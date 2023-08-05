@@ -5,9 +5,23 @@ namespace NESterpiece
 {
 	class Bus;
 
-	enum class AddressingMode
+	enum StatusFlags
 	{
-		Immediate,
+		Carry = 1,
+		Zero = 2,
+		IRQ = 4,
+		Decimal = 8,
+		Break = 16,
+		Blank = 32,
+		Overflow = 64,
+		Negative = 128
+	};
+
+	enum class CPURegister
+	{
+		A,
+		X,
+		Y
 	};
 
 	class CPU
@@ -17,19 +31,26 @@ namespace NESterpiece
 		{
 			bool complete = false;
 			uint8_t current_cycle = 0;
-			uint8_t fetched_data = 0;
-			uint16_t fetched_address = 0;
+			uint16_t data = 0;
+			uint16_t address = 0;
 			cpu_function addressing_function = nullptr, operation_function = nullptr;
 		};
 
 		int8_t ticks = 0;
-		ExecutionState state{};
+		ExecutionState state{
+			.complete = true,
+			.current_cycle = 0,
+			.data = 0,
+			.address = 0,
+			.addressing_function = nullptr,
+			.operation_function = nullptr,
+		};
 
 	public:
 		struct Registers
 		{
 			uint16_t pc = 0;
-			uint8_t a = 0, x = 0, y = 0, s = 0xFF, p = 0;
+			uint8_t a = 0, x = 0, y = 0, sp = 0xFF, sr = 0;
 		} registers;
 
 		void reset();
@@ -37,11 +58,10 @@ namespace NESterpiece
 		void step(Bus &bus);
 		void decode(uint8_t opcode);
 
-		void immediate_addressing(Bus &bus);
-
-		void lda(Bus &bus);
-		void sta(Bus &bus);
-		void stx(Bus &bus);
-		void sty(Bus &bus);
+		void adm_immediate(Bus &bus);
+		void adm_zero_page_r(Bus &bus);
+		void adm_zero_page_w(Bus &bus);
+		void adm_zero_page_rmw(Bus &bus);
+		void op_lda(Bus &bus);
 	};
 }

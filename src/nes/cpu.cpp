@@ -1,6 +1,7 @@
 #include "cpu.hpp"
 #include "bus.hpp"
 #include "constants.hpp"
+#include <cassert>
 
 namespace NESterpiece
 {
@@ -10,8 +11,8 @@ namespace NESterpiece
 		state = ExecutionState{
 			.complete = true,
 			.current_cycle = 0, // after the fetch/decode step
-			.fetched_data = 0,
-			.fetched_address = 0,
+			.data = 0,
+			.address = 0,
 			.addressing_function = nullptr,
 			.operation_function = nullptr,
 		};
@@ -23,13 +24,9 @@ namespace NESterpiece
 		if (ticks == CPU_CLOCK_RATE)
 		{
 			if (!state.complete)
-			{
 				(this->*state.addressing_function)(bus);
-			}
 			else
-			{
 				decode(bus.read(registers.pc));
-			}
 
 			ticks = 0;
 		}
@@ -38,58 +35,133 @@ namespace NESterpiece
 
 	void CPU::decode(uint8_t opcode)
 	{
-		uint8_t group = opcode & 0b11;
-		uint8_t address = (opcode & 0b11100) >> 2;
-		uint8_t instruction = (opcode & 0b11100000) >> 5;
-
 		state = ExecutionState{
 			.complete = false,
 			.current_cycle = 1,
-			.fetched_data = 0,
-			.fetched_address = 0,
-			.addressing_function = &CPU::immediate_addressing,
-			.operation_function = &CPU::lda,
+			.data = 0,
+			.address = 0,
+			.addressing_function = nullptr,
+			.operation_function = nullptr,
 		};
+
+		registers.pc++;
+
+		switch (opcode)
+		{
+		case 0xA9: // LDA #oper
+		{
+			state.addressing_function = &CPU::adm_immediate;
+			state.operation_function = &CPU::op_lda;
+			break;
+		}
+		case 0xA5: // LDA oper
+		{
+			state.addressing_function = &CPU::adm_zero_page_r;
+			state.operation_function = &CPU::op_lda;
+			break;
+		}
+
+		default: // Illegal/Unimplemented Opcodes
+		{
+			assert(false);
+			break;
+		}
+		}
 	}
 
-	void CPU::immediate_addressing(Bus &bus)
+	void CPU::adm_immediate(Bus &bus)
 	{
 		switch (state.current_cycle)
 		{
-		case 1:
+		case 1: // fetch immediate value and execute
 		{
-			state.fetched_data = bus.read(registers.pc + 1);
+			state.data = bus.read(registers.pc);
+			(this->*state.operation_function)(bus);
+			state.complete = true;
 			registers.pc++;
-			state.current_cycle++;
 			break;
 		}
-		case 2:
+		}
+		state.current_cycle++;
+	}
+
+	void CPU::adm_zero_page_r(Bus &bus)
+	{
+		switch (state.current_cycle)
 		{
+		case 1: // fetch zero page address
+		{
+			state.address = bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		case 2: // read from zero page and execute
+		{
+			state.data = bus.read(state.address);
 			(this->*state.operation_function)(bus);
 			state.complete = true;
 			break;
 		}
 		}
+		state.current_cycle++;
 	}
 
-	void CPU::lda(Bus &bus)
+	void CPU::adm_zero_page_w(Bus &bus)
 	{
-		// todo: set N and Z flags
-		registers.a = state.fetched_data;
+		switch (state.current_cycle)
+		{
+		case 1: // fetch zero page address
+		{
+			state.address = bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		case 2: // write to zero page and execute
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
 	}
 
-	void CPU::sta(Bus &bus)
+	void CPU::adm_zero_page_rmw(Bus &bus)
 	{
-		bus.write(state.fetched_address, registers.a);
+		switch (state.current_cycle)
+		{
+		case 1: // fetch zero page address
+		{
+			state.address = bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		case 2: // read from zero page
+		{
+			state.data = bus.read(state.address);
+			break;
+		}
+		case 3: // dummy write?
+		{
+			bus.write(state.address, state.data);
+			break;
+		}
+		case 4: // execute and write the modified value
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
 	}
 
-	void CPU::stx(Bus &bus)
+	void CPU::op_lda(Bus &bus)
 	{
-		bus.write(state.fetched_address, registers.x);
-	}
-
-	void CPU::sty(Bus &bus)
-	{
-		bus.write(state.fetched_address, registers.y);
+		registers.sr = (state.data == 0) ? (registers.sr | StatusFlags::Zero) : (registers.sr & ~StatusFlags::Zero);
+		registers.sr = (state.data & 128) ? (registers.sr | StatusFlags::Negative) : (registers.sr & ~StatusFlags::Negative);
+		registers.a = static_cast<uint8_t>(state.data & 0xFF);
 	}
 }

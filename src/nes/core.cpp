@@ -2,8 +2,11 @@
 
 namespace NESterpiece
 {
-	void Core::tick_components()
+	void Core::tick_components(int32_t rate)
 	{
-		cpu.step(bus);
+		do
+		{
+			cpu.step(bus);
+		} while (rate-- > 0);
 	}
 }

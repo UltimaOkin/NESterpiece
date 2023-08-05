@@ -9,6 +9,6 @@ namespace NESterpiece
 	public:
 		CPU cpu;
 		Bus bus;
-		void tick_components();
+		void tick_components(int32_t rate);
 	};
 }
