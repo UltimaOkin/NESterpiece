@@ -9,7 +9,6 @@ if(DEFINED ENV{VCPKG_DEFAULT_TRIPLET} AND NOT VCPKG_TARGET_TRIPLET)
 endif()
 
 option(MSVC_USE_STATIC_CRT "Enable MultiThreaded Runtime Library for MSVC" ON)
-option(BUILD_SUNBOY_FRONTEND "Build Frontend" ON)
 project(NESterpiece LANGUAGES CXX C)
 enable_testing()
 add_subdirectory(src)

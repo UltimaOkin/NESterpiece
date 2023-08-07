@@ -27,6 +27,7 @@ bool test_with_json(std::string path)
 			core.cpu.registers.x = initial["x"];
 			core.cpu.registers.y = initial["y"];
 			core.cpu.registers.sr = initial["p"];
+
 			for (const auto &ram : initial["ram"])
 			{
 				core.bus.memory[ram[0]] = ram[1];
@@ -41,28 +42,44 @@ bool test_with_json(std::string path)
 			}
 
 			const auto &result = object["final"];
-			fmt::print("[{}]\n", object["name"].get<std::string>());
 
-			if ((result["pc"] != core.cpu.registers.pc) ||
-				(result["s"] != core.cpu.registers.sp) ||
-				(result["a"] != core.cpu.registers.a) ||
-				(result["x"] != core.cpu.registers.x) ||
-				(result["y"] != core.cpu.registers.y) ||
-				(result["p"] != core.cpu.registers.sr))
+			if (result["pc"] != core.cpu.registers.pc)
 			{
 				fmt::print("pc: {:#x} - expected pc: {:#x}\n", core.cpu.registers.pc, result["pc"].get<uint16_t>());
-				fmt::print("sp: {:#x} - expected sp: {:#x}\n", core.cpu.registers.sp, result["s"].get<uint8_t>());
-				fmt::print(" a: {:#x} - expected  a: {:#x}\n", core.cpu.registers.a, result["a"].get<uint8_t>());
-				fmt::print(" x: {:#x} - expected  x: {:#x}\n", core.cpu.registers.x, result["x"].get<uint8_t>());
-				fmt::print(" y: {:#x} - expected  y: {:#x}\n", core.cpu.registers.a, result["y"].get<uint8_t>());
-				fmt::print(" p: {:#x} - expected  p: {:#x}\n", core.cpu.registers.sr, result["p"].get<uint8_t>());
+				test_failed = true;
+			}
 
+			if (result["s"] != core.cpu.registers.sp)
+			{
+				fmt::print("sp: {:#x} - expected sp: {:#x}\n", core.cpu.registers.sp, result["s"].get<uint8_t>());
+				test_failed = true;
+			}
+
+			if (result["a"] != core.cpu.registers.a)
+			{
+				fmt::print(" a: {:#x} - expected  a: {:#x}\n", core.cpu.registers.a, result["a"].get<uint8_t>());
+				test_failed = true;
+			}
+
+			if (result["x"] != core.cpu.registers.x)
+			{
+				fmt::print(" x: {:#x} - expected  x: {:#x}\n", core.cpu.registers.x, result["x"].get<uint8_t>());
+				test_failed = true;
+			}
+
+			if (result["y"] != core.cpu.registers.y)
+			{
+				fmt::print(" y: {:#x} - expected  y: {:#x}\n", core.cpu.registers.y, result["y"].get<uint8_t>());
+				test_failed = true;
+			}
+			if (result["p"] != core.cpu.registers.sr)
+			{
+				fmt::print(" p: {:#x} - expected  p: {:#x}\n", core.cpu.registers.sr, result["p"].get<uint8_t>());
 				test_failed = true;
 			}
 
 			for (const auto &ram : result["ram"])
 			{
-				core.bus.memory[ram[0]] = ram[1];
 				if (core.bus.memory[ram[0]] != ram[1])
 				{
 					fmt::print("\n{:#x}: {:#x} - expected: {:#x}\n", ram[0].get<uint16_t>(), core.bus.memory[ram[0]], ram[1].get<uint8_t>());
@@ -92,7 +109,10 @@ bool test_with_json(std::string path)
 			}
 
 			if (test_failed)
+			{
+				fmt::print("[{}]\n", object["name"].get<std::string>());
 				return false;
+			}
 		}
 
 		return true;
@@ -102,12 +122,181 @@ bool test_with_json(std::string path)
 	return false;
 }
 
+int lda_tests()
+{
+	if (!test_with_json("v1/a1.json"))
+		return 1;
+	if (!test_with_json("v1/b1.json"))
+		return 1;
+	if (!test_with_json("v1/b9.json"))
+		return 1;
+	if (!test_with_json("v1/bd.json"))
+		return 1;
+	if (!test_with_json("v1/ad.json"))
+		return 1;
+	if (!test_with_json("v1/b5.json"))
+		return 1;
+	if (!test_with_json("v1/a5.json"))
+		return 1;
+	if (!test_with_json("v1/a9.json"))
+		return 1;
+	return 0;
+}
+
+int ldx_tests()
+{
+	if (!test_with_json("v1/a2.json"))
+		return 1;
+	if (!test_with_json("v1/a6.json"))
+		return 1;
+	if (!test_with_json("v1/b6.json"))
+		return 1;
+	if (!test_with_json("v1/ae.json"))
+		return 1;
+	if (!test_with_json("v1/be.json"))
+		return 1;
+	return 0;
+}
+
+int ldy_tests()
+{
+	if (!test_with_json("v1/a0.json"))
+		return 1;
+	if (!test_with_json("v1/a4.json"))
+		return 1;
+	if (!test_with_json("v1/b4.json"))
+		return 1;
+	if (!test_with_json("v1/ac.json"))
+		return 1;
+	if (!test_with_json("v1/bc.json"))
+		return 1;
+	return 0;
+}
+
+int eor_tests()
+{
+	if (!test_with_json("v1/49.json"))
+		return 1;
+	if (!test_with_json("v1/45.json"))
+		return 1;
+	if (!test_with_json("v1/55.json"))
+		return 1;
+	if (!test_with_json("v1/4d.json"))
+		return 1;
+	if (!test_with_json("v1/5d.json"))
+		return 1;
+	if (!test_with_json("v1/59.json"))
+		return 1;
+	if (!test_with_json("v1/41.json"))
+		return 1;
+	if (!test_with_json("v1/51.json"))
+		return 1;
+	return 0;
+}
+
+int and_tests()
+{
+	if (!test_with_json("v1/29.json"))
+		return 1;
+	if (!test_with_json("v1/25.json"))
+		return 1;
+	if (!test_with_json("v1/35.json"))
+		return 1;
+	if (!test_with_json("v1/2d.json"))
+		return 1;
+	if (!test_with_json("v1/3d.json"))
+		return 1;
+	if (!test_with_json("v1/39.json"))
+		return 1;
+	if (!test_with_json("v1/21.json"))
+		return 1;
+	if (!test_with_json("v1/31.json"))
+		return 1;
+	return 0;
+}
+
+int ora_tests()
+{
+	if (!test_with_json("v1/09.json"))
+		return 1;
+	if (!test_with_json("v1/05.json"))
+		return 1;
+	if (!test_with_json("v1/15.json"))
+		return 1;
+	if (!test_with_json("v1/0d.json"))
+		return 1;
+	if (!test_with_json("v1/1d.json"))
+		return 1;
+	if (!test_with_json("v1/19.json"))
+		return 1;
+	if (!test_with_json("v1/01.json"))
+		return 1;
+	if (!test_with_json("v1/11.json"))
+		return 1;
+	return 0;
+}
+
+int adc_tests()
+{
+	if (!test_with_json("v1/69.json"))
+		return 1;
+	if (!test_with_json("v1/65.json"))
+		return 1;
+	if (!test_with_json("v1/75.json"))
+		return 1;
+	if (!test_with_json("v1/6d.json"))
+		return 1;
+	if (!test_with_json("v1/7d.json"))
+		return 1;
+	if (!test_with_json("v1/79.json"))
+		return 1;
+	if (!test_with_json("v1/61.json"))
+		return 1;
+	if (!test_with_json("v1/71.json"))
+		return 1;
+	return 0;
+}
+
+int sbc_tests()
+{
+	if (!test_with_json("v1/e9.json"))
+		return 1;
+	if (!test_with_json("v1/e5.json"))
+		return 1;
+	if (!test_with_json("v1/f5.json"))
+		return 1;
+	if (!test_with_json("v1/ed.json"))
+		return 1;
+	if (!test_with_json("v1/fd.json"))
+		return 1;
+	if (!test_with_json("v1/f9.json"))
+		return 1;
+	if (!test_with_json("v1/e1.json"))
+		return 1;
+	if (!test_with_json("v1/f1.json"))
+		return 1;
+	return 0;
+}
+
 int main()
 {
-	if (!test_with_json("a5.json"))
+	fmt::print("Starting Tests.\n");
+	if (sbc_tests())
 		return 1;
-	if (!test_with_json("a9.json"))
+	if (adc_tests())
 		return 1;
-
+	if (ora_tests())
+		return 1;
+	if (and_tests())
+		return 1;
+	if (eor_tests())
+		return 1;
+	if (ldy_tests())
+		return 1;
+	if (ldx_tests())
+		return 1;
+	if (lda_tests())
+		return 1;
+	fmt::print("All Complete.\n");
 	return 0;
 }
