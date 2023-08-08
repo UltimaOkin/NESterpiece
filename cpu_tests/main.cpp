@@ -278,9 +278,116 @@ int sbc_tests()
 	return 0;
 }
 
+int cmp_tests()
+{
+	if (!test_with_json("v1/c9.json"))
+		return 1;
+	if (!test_with_json("v1/c5.json"))
+		return 1;
+	if (!test_with_json("v1/d5.json"))
+		return 1;
+	if (!test_with_json("v1/cd.json"))
+		return 1;
+	if (!test_with_json("v1/dd.json"))
+		return 1;
+	if (!test_with_json("v1/d9.json"))
+		return 1;
+	if (!test_with_json("v1/c1.json"))
+		return 1;
+	if (!test_with_json("v1/d1.json"))
+		return 1;
+	return 0;
+}
+
+int cpx_tests()
+{
+	if (!test_with_json("v1/e0.json"))
+		return 1;
+	if (!test_with_json("v1/e4.json"))
+		return 1;
+	if (!test_with_json("v1/ec.json"))
+		return 1;
+	return 0;
+}
+
+int cpy_tests()
+{
+	if (!test_with_json("v1/c0.json"))
+		return 1;
+	if (!test_with_json("v1/c4.json"))
+		return 1;
+	if (!test_with_json("v1/cc.json"))
+		return 1;
+	return 0;
+}
+
+int bit_tests()
+{
+	if (!test_with_json("v1/24.json"))
+		return 1;
+	if (!test_with_json("v1/2c.json"))
+		return 1;
+	return 0;
+}
+
+int sta_tests()
+{
+	if (!test_with_json("v1/85.json"))
+		return 1;
+	if (!test_with_json("v1/95.json"))
+		return 1;
+	if (!test_with_json("v1/8d.json"))
+		return 1;
+	if (!test_with_json("v1/9d.json"))
+		return 1;
+	if (!test_with_json("v1/99.json"))
+		return 1;
+	if (!test_with_json("v1/81.json"))
+		return 1;
+	if (!test_with_json("v1/91.json"))
+		return 1;
+	return 0;
+}
+
+int stx_tests()
+{
+	if (!test_with_json("v1/86.json"))
+		return 1;
+	if (!test_with_json("v1/96.json"))
+		return 1;
+	if (!test_with_json("v1/8e.json"))
+		return 1;
+	return 0;
+}
+
+int sty_tests()
+{
+	if (!test_with_json("v1/84.json"))
+		return 1;
+	if (!test_with_json("v1/94.json"))
+		return 1;
+	if (!test_with_json("v1/8c.json"))
+		return 1;
+	return 0;
+}
+
 int main()
 {
 	fmt::print("Starting Tests.\n");
+	if (sty_tests())
+		return 1;
+	if (stx_tests())
+		return 1;
+	if (sta_tests())
+		return 1;
+	if (bit_tests())
+		return 1;
+	if (cpy_tests())
+		return 1;
+	if (cpx_tests())
+		return 1;
+	if (cmp_tests())
+		return 1;
 	if (sbc_tests())
 		return 1;
 	if (adc_tests())

@@ -23,10 +23,18 @@ namespace NESterpiece
 		X,
 		Y
 	};
+
 	enum class InstructionType
 	{
 		Read,
 		Write
+	};
+
+	enum class BitOp
+	{
+		XOR,
+		AND,
+		OR
 	};
 
 	class CPU
@@ -60,16 +68,19 @@ namespace NESterpiece
 		} registers;
 
 		void reset();
-
 		void step(Bus &bus);
-		void op_lda(Bus &bus);
-		void op_ldx(Bus &bus);
-		void op_ldy(Bus &bus);
-		void op_eor(Bus &bus);
-		void op_and(Bus &bus);
-		void op_ora(Bus &bus);
+
+		template <CPURegister cpu_reg>
+		void op_ld_r(Bus &bus);
+		template <BitOp bit_op>
+		void op_bitwise(Bus &bus);
 		void op_adc(Bus &bus);
 		void op_sbc(Bus &bus);
+		template <CPURegister cpu_reg>
+		void op_cmp_r(Bus &bus);
+		void op_bit(Bus &bus);
+		template <CPURegister cpu_reg>
+		void op_st_r(Bus &bus);
 
 		void adm_implied(Bus &bus);
 		void adm_immediate(Bus &bus);

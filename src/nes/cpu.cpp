@@ -33,55 +33,47 @@ namespace NESterpiece
 		ticks++;
 	}
 
-	void CPU::op_lda(Bus &bus)
+	template <CPURegister cpu_reg>
+	void CPU::op_ld_r(Bus &bus)
 	{
 		auto data = static_cast<uint8_t>(state.data & 0xFF);
 		registers.sr = data == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = data & 0x80 ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
-		registers.a = data;
+		registers.sr = data & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+
+		switch (cpu_reg)
+		{
+		case CPURegister::A:
+			registers.a = data;
+			break;
+		case CPURegister::X:
+			registers.x = data;
+			break;
+		case CPURegister::Y:
+			registers.y = data;
+			break;
+		}
 	}
 
-	void CPU::op_ldx(Bus &bus)
+	template <BitOp bit_op>
+	void CPU::op_bitwise(Bus &bus)
 	{
 		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		registers.sr = data == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = data & 0x80 ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
-		registers.x = data;
-	}
 
-	void CPU::op_ldy(Bus &bus)
-	{
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		registers.sr = data == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = data & 0x80 ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
-		registers.y = data;
-	}
-
-	void CPU::op_eor(Bus &bus)
-	{
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		registers.a ^= data;
+		switch (bit_op)
+		{
+		case BitOp::XOR:
+			registers.a ^= data;
+			break;
+		case BitOp::AND:
+			registers.a &= data;
+			break;
+		case BitOp::OR:
+			registers.a |= data;
+			break;
+		}
 
 		registers.sr = registers.a == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = registers.a & 0x80 ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
-	}
-
-	void CPU::op_and(Bus &bus)
-	{
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		registers.a &= data;
-
-		registers.sr = registers.a == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = registers.a & 0x80 ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
-	}
-
-	void CPU::op_ora(Bus &bus)
-	{
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		registers.a |= data;
-
-		registers.sr = registers.a == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = registers.a & 0x80 ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+		registers.sr = registers.a & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
 	}
 
 	void CPU::op_adc(Bus &bus)
@@ -93,7 +85,7 @@ namespace NESterpiece
 		result &= 0xFF;
 
 		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = result & 0x80 ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+		registers.sr = result & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
 		registers.sr = ~(registers.a ^ data) & (registers.a ^ result) & 0x80 ? registers.sr | StatusFlags::Overflow : registers.sr & ~StatusFlags::Overflow;
 
 		registers.a = static_cast<uint8_t>(result);
@@ -103,6 +95,64 @@ namespace NESterpiece
 	{
 		state.data = ~state.data;
 		op_adc(bus);
+	}
+
+	template <CPURegister cpu_reg>
+	void CPU::op_cmp_r(Bus &bus)
+	{
+		uint8_t reg = 0;
+		switch (cpu_reg)
+		{
+		case CPURegister::A:
+			reg = registers.a;
+			break;
+		case CPURegister::X:
+			reg = registers.x;
+			break;
+		case CPURegister::Y:
+			reg = registers.y;
+			break;
+		}
+
+		auto data = static_cast<uint8_t>(state.data & 0xFF);
+		uint8_t result = (reg - data) & StatusFlags::Negative;
+		registers.sr &= ~(StatusFlags::Negative | StatusFlags::Zero | StatusFlags::Carry);
+
+		if (reg < data)
+			registers.sr |= result;
+		else if (reg == data)
+			registers.sr |= StatusFlags::Zero | StatusFlags::Carry;
+		else if (reg > data)
+			registers.sr |= result | StatusFlags::Carry;
+	}
+
+	void CPU::op_bit(Bus &bus)
+	{
+		auto data = static_cast<uint8_t>(state.data & 0xFF);
+		uint8_t result = registers.a & data;
+		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
+
+		registers.sr &= ~(StatusFlags::Negative | StatusFlags::Overflow);
+		registers.sr |= data & 0xC0;
+	}
+
+	template <CPURegister cpu_reg>
+	void CPU::op_st_r(Bus &bus)
+	{
+		uint8_t reg = 0;
+		switch (cpu_reg)
+		{
+		case CPURegister::A:
+			reg = registers.a;
+			break;
+		case CPURegister::X:
+			reg = registers.x;
+			break;
+		case CPURegister::Y:
+			reg = registers.y;
+			break;
+		}
+		state.data = reg;
 	}
 
 	void CPU::adm_implied(Bus &bus)
@@ -753,277 +803,271 @@ namespace NESterpiece
 
 		switch (opcode)
 		{
-#pragma region LDA
+		// LDA
 		case 0xA1:
 		{
 			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Read>;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
 		case 0xA5:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
 		case 0xA9:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
 		case 0xAD:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
 		case 0xB1:
 		{
 			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Read>;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
 		case 0xB5:
 		{
 			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
 		case 0xBD:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
 		case 0xB9:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_lda;
+			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
 			break;
 		}
-#pragma endregion LDA
 
-#pragma region LDX
+		// LDX
 		case 0xA2:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_ldx;
+			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
 			break;
 		}
 		case 0xA6:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_ldx;
+			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
 			break;
 		}
 		case 0xB6:
 		{
 			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_ldx;
+			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
 			break;
 		}
 		case 0xAE:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_ldx;
+			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
 			break;
 		}
 		case 0xBE:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_ldx;
+			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
 			break;
 		}
-#pragma endregion LDX
 
-#pragma region LDY
+		// LDY
 		case 0xA0:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_ldy;
+			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
 			break;
 		}
 		case 0xA4:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_ldy;
+			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
 			break;
 		}
 		case 0xB4:
 		{
 			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ldy;
+			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
 			break;
 		}
 		case 0xAC:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_ldy;
+			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
 			break;
 		}
 		case 0xBC:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ldy;
+			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
 			break;
 		}
-#pragma endregion LDY
 
-#pragma region EOR
+		// EOR
 		case 0x49:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x45:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x55:
 		{
 			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x4D:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x5D:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x59:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x41:
 		{
 			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Read>;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x51:
 		{
 			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Read>;
-			state.operation_function = &CPU::op_eor;
+			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
-#pragma endregion EOR
 
-#pragma region AND
+		// AND
 		case 0x29:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x25:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x35:
 		{
 			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x2D:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x3D:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x39:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x21:
 		{
 			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Read>;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x31:
 		{
 			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Read>;
-			state.operation_function = &CPU::op_and;
+			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
-#pragma endregion AND
 
-#pragma region ORA
+		// ORA
 		case 0x09:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x05:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x15:
 		{
 			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x0D:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x1D:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x19:
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x01:
 		{
 			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Read>;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x11:
 		{
 			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Read>;
-			state.operation_function = &CPU::op_ora;
+			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
-#pragma endregion ORA
 
-#pragma region ADC
+		// ADC
 		case 0x69:
 		{
 			state.addressing_function = &CPU::adm_immediate;
@@ -1072,9 +1116,8 @@ namespace NESterpiece
 			state.operation_function = &CPU::op_adc;
 			break;
 		}
-#pragma endregion ADC
 
-#pragma region SBC
+		// SBC
 		case 0xE9:
 		{
 			state.addressing_function = &CPU::adm_immediate;
@@ -1123,7 +1166,194 @@ namespace NESterpiece
 			state.operation_function = &CPU::op_sbc;
 			break;
 		}
-#pragma endregion SBC
+
+		// CMP
+		case 0xC9:
+		{
+			state.addressing_function = &CPU::adm_immediate;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+		case 0xC5:
+		{
+			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+		case 0xD5:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+		case 0xCD:
+		{
+			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+		case 0xDD:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+		case 0xD9:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+		case 0xC1:
+		{
+			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+		case 0xD1:
+		{
+			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			break;
+		}
+
+		// CPX
+		case 0xE0:
+		{
+			state.addressing_function = &CPU::adm_immediate;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::X>;
+			break;
+		}
+		case 0xE4:
+		{
+			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::X>;
+			break;
+		}
+		case 0xEC:
+		{
+			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::X>;
+			break;
+		}
+
+		// CPY
+		case 0xC0:
+		{
+			state.addressing_function = &CPU::adm_immediate;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::Y>;
+			break;
+		}
+		case 0xC4:
+		{
+			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::Y>;
+			break;
+		}
+		case 0xCC:
+		{
+			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_r<CPURegister::Y>;
+			break;
+		}
+
+		// BIT
+		case 0x24:
+		{
+			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
+			state.operation_function = &CPU::op_bit;
+			break;
+		}
+		case 0x2C:
+		{
+			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
+			state.operation_function = &CPU::op_bit;
+			break;
+		}
+
+		// STA
+		case 0x85:
+		{
+			state.addressing_function = &CPU::adm_zero_page<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			break;
+		}
+		case 0x95:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			break;
+		}
+		case 0x8D:
+		{
+			state.addressing_function = &CPU::adm_absolute<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			break;
+		}
+		case 0x9D:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			break;
+		}
+		case 0x99:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			break;
+		}
+		case 0x81:
+		{
+			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			break;
+		}
+		case 0x91:
+		{
+			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			break;
+		}
+
+		// STX
+		case 0x86:
+		{
+			state.addressing_function = &CPU::adm_zero_page<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::X>;
+			break;
+		}
+		case 0x96:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::Y, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::X>;
+			break;
+		}
+		case 0x8E:
+		{
+			state.addressing_function = &CPU::adm_absolute<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::X>;
+			break;
+		}
+
+		// STY
+		case 0x84:
+		{
+			state.addressing_function = &CPU::adm_zero_page<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::Y>;
+			break;
+		}
+		case 0x94:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::Y>;
+			break;
+		}
+		case 0x8C:
+		{
+			state.addressing_function = &CPU::adm_absolute<InstructionType::Write>;
+			state.operation_function = &CPU::op_st_r<CPURegister::Y>;
+			break;
+		}
 
 		default: // Illegal/Unimplemented Opcodes
 		{
