@@ -33,22 +33,22 @@ namespace NESterpiece
 		ticks++;
 	}
 
-	template <CPURegister cpu_reg>
-	void CPU::op_ld_r(Bus &bus)
+	template <TargetValue val>
+	void CPU::op_ld_v(Bus &bus)
 	{
 		auto data = static_cast<uint8_t>(state.data & 0xFF);
 		registers.sr = data == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
 		registers.sr = data & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
 
-		switch (cpu_reg)
+		switch (val)
 		{
-		case CPURegister::A:
+		case TargetValue::A:
 			registers.a = data;
 			break;
-		case CPURegister::X:
+		case TargetValue::X:
 			registers.x = data;
 			break;
-		case CPURegister::Y:
+		case TargetValue::Y:
 			registers.y = data;
 			break;
 		}
@@ -97,19 +97,19 @@ namespace NESterpiece
 		op_adc(bus);
 	}
 
-	template <CPURegister cpu_reg>
-	void CPU::op_cmp_r(Bus &bus)
+	template <TargetValue val>
+	void CPU::op_cmp_v(Bus &bus)
 	{
 		uint8_t reg = 0;
-		switch (cpu_reg)
+		switch (val)
 		{
-		case CPURegister::A:
+		case TargetValue::A:
 			reg = registers.a;
 			break;
-		case CPURegister::X:
+		case TargetValue::X:
 			reg = registers.x;
 			break;
-		case CPURegister::Y:
+		case TargetValue::Y:
 			reg = registers.y;
 			break;
 		}
@@ -136,23 +136,93 @@ namespace NESterpiece
 		registers.sr |= data & 0xC0;
 	}
 
-	template <CPURegister cpu_reg>
-	void CPU::op_st_r(Bus &bus)
+	template <TargetValue val>
+	void CPU::op_st_v(Bus &bus)
 	{
 		uint8_t reg = 0;
-		switch (cpu_reg)
+		switch (val)
 		{
-		case CPURegister::A:
+		case TargetValue::A:
 			reg = registers.a;
 			break;
-		case CPURegister::X:
+		case TargetValue::X:
 			reg = registers.x;
 			break;
-		case CPURegister::Y:
+		case TargetValue::Y:
 			reg = registers.y;
 			break;
 		}
 		state.data = reg;
+	}
+
+	template <TargetValue val>
+	void CPU::op_inc_v(Bus &bus)
+	{
+		uint8_t result = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+			result = ++registers.a;
+			break;
+		case TargetValue::X:
+			result = ++registers.x;
+			break;
+		case TargetValue::Y:
+			result = ++registers.y;
+			break;
+		case TargetValue::S:
+			result = ++registers.sp;
+			break;
+		case TargetValue::M:
+			++state.data;
+			state.data &= 0xFF;
+			result = static_cast<uint8_t>(state.data);
+			break;
+		}
+
+		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
+		registers.sr = result & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_dec_v(Bus &bus)
+	{
+		uint8_t result = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+			result = --registers.a;
+			break;
+		case TargetValue::X:
+			result = --registers.x;
+			break;
+		case TargetValue::Y:
+			result = --registers.y;
+			break;
+		case TargetValue::S:
+			result = --registers.sp;
+			break;
+		case TargetValue::M:
+			--state.data;
+			state.data &= 0xFF;
+			result = static_cast<uint8_t>(state.data);
+			break;
+		}
+
+		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
+		registers.sr = result & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+	}
+
+	template <StatusFlags flag>
+	void CPU::op_clear_f(Bus &bus)
+	{
+		registers.sr &= ~flag;
+	}
+
+	template <StatusFlags flag>
+	void CPU::op_set_f(Bus &bus)
+	{
+		registers.sr |= flag;
 	}
 
 	void CPU::adm_implied(Bus &bus)
@@ -248,7 +318,7 @@ namespace NESterpiece
 		state.current_cycle++;
 	}
 
-	template <CPURegister reg, InstructionType type>
+	template <TargetValue reg, InstructionType type>
 	void CPU::adm_zero_page_indexed(Bus &bus)
 	{
 		switch (state.current_cycle)
@@ -263,9 +333,9 @@ namespace NESterpiece
 		{
 			state.data = bus.read(state.address);
 
-			if constexpr (reg == CPURegister::X)
+			if constexpr (reg == TargetValue::X)
 				state.address += registers.x;
-			else if constexpr (reg == CPURegister::Y)
+			else if constexpr (reg == TargetValue::Y)
 				state.address += registers.y;
 
 			state.address &= 0xFF;
@@ -422,7 +492,7 @@ namespace NESterpiece
 		state.current_cycle++;
 	}
 
-	template <CPURegister reg, InstructionType type>
+	template <TargetValue reg, InstructionType type>
 	void CPU::adm_absolute_indexed(Bus &bus)
 	{
 		switch (state.current_cycle)
@@ -437,14 +507,14 @@ namespace NESterpiece
 		{
 			uint16_t low = state.address;
 
-			if constexpr (reg == CPURegister::X)
+			if constexpr (reg == TargetValue::X)
 			{
 				state.address += registers.x;
 
 				if ((low + registers.x) > 0xFF)
 					state.page_crossed = true;
 			}
-			else if constexpr (reg == CPURegister::Y)
+			else if constexpr (reg == TargetValue::Y)
 			{
 				state.address += registers.y;
 				if ((low + registers.y) > 0xFF)
@@ -807,49 +877,49 @@ namespace NESterpiece
 		case 0xA1:
 		{
 			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 		case 0xA5:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 		case 0xA9:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 		case 0xAD:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 		case 0xB1:
 		{
 			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 		case 0xB5:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 		case 0xBD:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 		case 0xB9:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::A>;
 			break;
 		}
 
@@ -857,31 +927,31 @@ namespace NESterpiece
 		case 0xA2:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::X>;
 			break;
 		}
 		case 0xA6:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::X>;
 			break;
 		}
 		case 0xB6:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::Y, InstructionType::Read>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::X>;
 			break;
 		}
 		case 0xAE:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::X>;
 			break;
 		}
 		case 0xBE:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::X>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::X>;
 			break;
 		}
 
@@ -889,31 +959,31 @@ namespace NESterpiece
 		case 0xA0:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::Y>;
 			break;
 		}
 		case 0xA4:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::Y>;
 			break;
 		}
 		case 0xB4:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::Y>;
 			break;
 		}
 		case 0xAC:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::Y>;
 			break;
 		}
 		case 0xBC:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_ld_r<CPURegister::Y>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_ld_v<TargetValue::Y>;
 			break;
 		}
 
@@ -932,7 +1002,7 @@ namespace NESterpiece
 		}
 		case 0x55:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
@@ -944,13 +1014,13 @@ namespace NESterpiece
 		}
 		case 0x5D:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
 		case 0x59:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::XOR>;
 			break;
 		}
@@ -982,7 +1052,7 @@ namespace NESterpiece
 		}
 		case 0x35:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
@@ -994,13 +1064,13 @@ namespace NESterpiece
 		}
 		case 0x3D:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
 		case 0x39:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::AND>;
 			break;
 		}
@@ -1032,7 +1102,7 @@ namespace NESterpiece
 		}
 		case 0x15:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
@@ -1044,13 +1114,13 @@ namespace NESterpiece
 		}
 		case 0x1D:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
 		case 0x19:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
 			state.operation_function = &CPU::op_bitwise<BitOp::OR>;
 			break;
 		}
@@ -1082,7 +1152,7 @@ namespace NESterpiece
 		}
 		case 0x75:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_adc;
 			break;
 		}
@@ -1094,13 +1164,13 @@ namespace NESterpiece
 		}
 		case 0x7D:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_adc;
 			break;
 		}
 		case 0x79:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
 			state.operation_function = &CPU::op_adc;
 			break;
 		}
@@ -1132,7 +1202,7 @@ namespace NESterpiece
 		}
 		case 0xF5:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_sbc;
 			break;
 		}
@@ -1144,13 +1214,13 @@ namespace NESterpiece
 		}
 		case 0xFD:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
 			state.operation_function = &CPU::op_sbc;
 			break;
 		}
 		case 0xF9:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
 			state.operation_function = &CPU::op_sbc;
 			break;
 		}
@@ -1171,49 +1241,49 @@ namespace NESterpiece
 		case 0xC9:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 		case 0xC5:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 		case 0xD5:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 		case 0xCD:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 		case 0xDD:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 		case 0xD9:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Read>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 		case 0xC1:
 		{
 			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 		case 0xD1:
 		{
 			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::A>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::A>;
 			break;
 		}
 
@@ -1221,19 +1291,19 @@ namespace NESterpiece
 		case 0xE0:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::X>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::X>;
 			break;
 		}
 		case 0xE4:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::X>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::X>;
 			break;
 		}
 		case 0xEC:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::X>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::X>;
 			break;
 		}
 
@@ -1241,19 +1311,19 @@ namespace NESterpiece
 		case 0xC0:
 		{
 			state.addressing_function = &CPU::adm_immediate;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::Y>;
 			break;
 		}
 		case 0xC4:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::Y>;
 			break;
 		}
 		case 0xCC:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Read>;
-			state.operation_function = &CPU::op_cmp_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_cmp_v<TargetValue::Y>;
 			break;
 		}
 
@@ -1275,43 +1345,43 @@ namespace NESterpiece
 		case 0x85:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			state.operation_function = &CPU::op_st_v<TargetValue::A>;
 			break;
 		}
 		case 0x95:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_v<TargetValue::A>;
 			break;
 		}
 		case 0x8D:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			state.operation_function = &CPU::op_st_v<TargetValue::A>;
 			break;
 		}
 		case 0x9D:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::X, InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::X, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_v<TargetValue::A>;
 			break;
 		}
 		case 0x99:
 		{
-			state.addressing_function = &CPU::adm_absolute_indexed<CPURegister::Y, InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			state.addressing_function = &CPU::adm_absolute_indexed<TargetValue::Y, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_v<TargetValue::A>;
 			break;
 		}
 		case 0x81:
 		{
 			state.addressing_function = &CPU::adm_indexed_indirect_x<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			state.operation_function = &CPU::op_st_v<TargetValue::A>;
 			break;
 		}
 		case 0x91:
 		{
 			state.addressing_function = &CPU::adm_indirect_indexed_y<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::A>;
+			state.operation_function = &CPU::op_st_v<TargetValue::A>;
 			break;
 		}
 
@@ -1319,19 +1389,19 @@ namespace NESterpiece
 		case 0x86:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::X>;
+			state.operation_function = &CPU::op_st_v<TargetValue::X>;
 			break;
 		}
 		case 0x96:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::Y, InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::X>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::Y, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_v<TargetValue::X>;
 			break;
 		}
 		case 0x8E:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::X>;
+			state.operation_function = &CPU::op_st_v<TargetValue::X>;
 			break;
 		}
 
@@ -1339,19 +1409,159 @@ namespace NESterpiece
 		case 0x84:
 		{
 			state.addressing_function = &CPU::adm_zero_page<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_st_v<TargetValue::Y>;
 			break;
 		}
 		case 0x94:
 		{
-			state.addressing_function = &CPU::adm_zero_page_indexed<CPURegister::X, InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::Y>;
+			state.addressing_function = &CPU::adm_zero_page_indexed<TargetValue::X, InstructionType::Write>;
+			state.operation_function = &CPU::op_st_v<TargetValue::Y>;
 			break;
 		}
 		case 0x8C:
 		{
 			state.addressing_function = &CPU::adm_absolute<InstructionType::Write>;
-			state.operation_function = &CPU::op_st_r<CPURegister::Y>;
+			state.operation_function = &CPU::op_st_v<TargetValue::Y>;
+			break;
+		}
+		// START
+		// INC
+		case 0xE6:
+		{
+			state.addressing_function = &CPU::adm_zero_page_rmw;
+			state.operation_function = &CPU::op_inc_v<TargetValue::M>;
+			break;
+		}
+		case 0xF6:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed_rmw;
+			state.operation_function = &CPU::op_inc_v<TargetValue::M>;
+			break;
+		}
+		case 0xEE:
+		{
+			state.addressing_function = &CPU::adm_absolute_rmw;
+			state.operation_function = &CPU::op_inc_v<TargetValue::M>;
+			break;
+		}
+		case 0xFE:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed_rmw;
+			state.operation_function = &CPU::op_inc_v<TargetValue::M>;
+			break;
+		}
+
+		// INX
+		case 0xE8:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_inc_v<TargetValue::X>;
+			break;
+		}
+
+		// INY
+		case 0xC8:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_inc_v<TargetValue::Y>;
+			break;
+		}
+
+		// DEC
+		case 0xC6:
+		{
+			state.addressing_function = &CPU::adm_zero_page_rmw;
+			state.operation_function = &CPU::op_dec_v<TargetValue::M>;
+			break;
+		}
+		case 0xD6:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed_rmw;
+			state.operation_function = &CPU::op_dec_v<TargetValue::M>;
+			break;
+		}
+		case 0xCE:
+		{
+			state.addressing_function = &CPU::adm_absolute_rmw;
+			state.operation_function = &CPU::op_dec_v<TargetValue::M>;
+			break;
+		}
+		case 0xDE:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed_rmw;
+			state.operation_function = &CPU::op_dec_v<TargetValue::M>;
+			break;
+		}
+
+		// DEX
+		case 0xCA:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_dec_v<TargetValue::X>;
+			break;
+		}
+
+		// DEY
+		case 0x88:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_dec_v<TargetValue::Y>;
+			break;
+		}
+
+		// CLC
+		case 0x18:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_clear_f<StatusFlags::Carry>;
+			break;
+		}
+
+		// CLD
+		case 0xD8:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_clear_f<StatusFlags::Decimal>;
+			break;
+		}
+
+		// CLI
+		case 0x58:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_clear_f<StatusFlags::IRQ>;
+			break;
+		}
+
+		// CLV
+		case 0xB8:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_clear_f<StatusFlags::Overflow>;
+			break;
+		}
+
+		// SEC
+		case 0x38:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_set_f<StatusFlags::Carry>;
+			break;
+		}
+
+		// SED
+		case 0xF8:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_set_f<StatusFlags::Decimal>;
+			break;
+		}
+
+		// SEI
+		case 0x78:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_set_f<StatusFlags::IRQ>;
 			break;
 		}
 

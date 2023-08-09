@@ -17,11 +17,13 @@ namespace NESterpiece
 		Negative = 128
 	};
 
-	enum class CPURegister
+	enum class TargetValue
 	{
 		A,
 		X,
-		Y
+		Y,
+		S,
+		M
 	};
 
 	enum class InstructionType
@@ -70,31 +72,39 @@ namespace NESterpiece
 		void reset();
 		void step(Bus &bus);
 
-		template <CPURegister cpu_reg>
-		void op_ld_r(Bus &bus);
+		template <TargetValue val>
+		void op_ld_v(Bus &bus);
 		template <BitOp bit_op>
 		void op_bitwise(Bus &bus);
 		void op_adc(Bus &bus);
 		void op_sbc(Bus &bus);
-		template <CPURegister cpu_reg>
-		void op_cmp_r(Bus &bus);
+		template <TargetValue val>
+		void op_cmp_v(Bus &bus);
 		void op_bit(Bus &bus);
-		template <CPURegister cpu_reg>
-		void op_st_r(Bus &bus);
+		template <TargetValue val>
+		void op_st_v(Bus &bus);
+		template <TargetValue val>
+		void op_inc_v(Bus &bus);
+		template <TargetValue val>
+		void op_dec_v(Bus &bus);
+		template <StatusFlags flag>
+		void op_clear_f(Bus &bus);
+		template <StatusFlags flag>
+		void op_set_f(Bus &bus);
 
 		void adm_implied(Bus &bus);
 		void adm_immediate(Bus &bus);
 		template <InstructionType type>
 		void adm_zero_page(Bus &bus);
 		void adm_zero_page_rmw(Bus &bus);
-		template <CPURegister reg, InstructionType type>
+		template <TargetValue reg, InstructionType type>
 		void adm_zero_page_indexed(Bus &bus);
 		void adm_zero_page_indexed_rmw(Bus &bus);
 		template <InstructionType type>
 		void adm_absolute(Bus &bus);
 		void adm_absolute_rmw(Bus &bus);
 		void adm_absolute_jmp(Bus &bus);
-		template <CPURegister reg, InstructionType type>
+		template <TargetValue reg, InstructionType type>
 		void adm_absolute_indexed(Bus &bus);
 		void adm_absolute_indexed_rmw(Bus &bus);
 		template <InstructionType type>

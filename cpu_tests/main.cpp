@@ -371,9 +371,69 @@ int sty_tests()
 	return 0;
 }
 
+int inc_tests()
+{
+	if (!test_with_json("v1/e6.json"))
+		return 1;
+	if (!test_with_json("v1/f6.json"))
+		return 1;
+	if (!test_with_json("v1/ee.json"))
+		return 1;
+	if (!test_with_json("v1/fe.json"))
+		return 1;
+	if (!test_with_json("v1/e8.json"))
+		return 1;
+	if (!test_with_json("v1/c8.json"))
+		return 1;
+	return 0;
+}
+
+int dec_tests()
+{
+	if (!test_with_json("v1/c6.json"))
+		return 1;
+	if (!test_with_json("v1/d6.json"))
+		return 1;
+	if (!test_with_json("v1/ce.json"))
+		return 1;
+	if (!test_with_json("v1/de.json"))
+		return 1;
+	if (!test_with_json("v1/ca.json"))
+		return 1;
+	if (!test_with_json("v1/88.json"))
+		return 1;
+	return 0;
+}
+
+int flag_tests()
+{
+	if (!test_with_json("v1/18.json"))
+		return 1;
+	if (!test_with_json("v1/d8.json"))
+		return 1;
+	if (!test_with_json("v1/58.json"))
+		return 1;
+	if (!test_with_json("v1/b8.json"))
+		return 1;
+	if (!test_with_json("v1/38.json"))
+		return 1;
+	if (!test_with_json("v1/f8.json"))
+		return 1;
+	if (!test_with_json("v1/78.json"))
+		return 1;
+
+	return 0;
+}
+
 int main()
 {
 	fmt::print("Starting Tests.\n");
+	if (flag_tests())
+		return 1;
+	if (dec_tests())
+		return 1;
+	if (inc_tests())
+		return 1;
 	if (sty_tests())
 		return 1;
 	if (stx_tests())
