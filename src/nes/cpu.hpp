@@ -11,8 +11,8 @@ namespace NESterpiece
 		Zero = 2,
 		IRQ = 4,
 		Decimal = 8,
-		Break = 16,
-		Blank = 32,
+		Blank = 16,
+		Break = 32,
 		Overflow = 64,
 		Negative = 128
 	};
@@ -23,7 +23,8 @@ namespace NESterpiece
 		X,
 		Y,
 		S,
-		M
+		M,
+		P
 	};
 
 	enum class InstructionType
@@ -51,7 +52,6 @@ namespace NESterpiece
 			cpu_function addressing_function = nullptr, operation_function = nullptr;
 		};
 
-		int8_t ticks = 0;
 		ExecutionState state{
 			.complete = true,
 			.page_crossed = false,
@@ -66,7 +66,7 @@ namespace NESterpiece
 		struct Registers
 		{
 			uint16_t pc = 0;
-			uint8_t a = 0, x = 0, y = 0, sp = 0xFF, sr = 0;
+			uint8_t a = 0, x = 0, y = 0, s = 0xFF, p = 0;
 		} registers;
 
 		void reset();
@@ -91,7 +91,23 @@ namespace NESterpiece
 		void op_clear_f(Bus &bus);
 		template <StatusFlags flag>
 		void op_set_f(Bus &bus);
+		template <TargetValue src, TargetValue dst>
+		void op_transfer_vv(Bus &bus);
+		template <TargetValue val>
+		void op_push_v(Bus &bus);
+		template <TargetValue val>
+		void op_pop_v(Bus &bus);
+		template <TargetValue val>
+		void op_asl_v(Bus &bus);
+		template <TargetValue val>
+		void op_lsr_v(Bus &bus);
+		template <TargetValue val>
+		void op_rol_v(Bus &bus);
+		template <TargetValue val>
+		void op_ror_v(Bus &bus);
 
+		void adm_pha_php(Bus &bus);
+		void adm_pla_plp(Bus &bus);
 		void adm_implied(Bus &bus);
 		void adm_immediate(Bus &bus);
 		template <InstructionType type>

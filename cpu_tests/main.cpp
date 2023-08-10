@@ -22,11 +22,11 @@ bool test_with_json(std::string path)
 			const auto &initial = object["initial"];
 			NESterpiece::Core core{};
 			core.cpu.registers.pc = initial["pc"];
-			core.cpu.registers.sp = initial["s"];
+			core.cpu.registers.s = initial["s"];
 			core.cpu.registers.a = initial["a"];
 			core.cpu.registers.x = initial["x"];
 			core.cpu.registers.y = initial["y"];
-			core.cpu.registers.sr = initial["p"];
+			core.cpu.registers.p = initial["p"];
 
 			for (const auto &ram : initial["ram"])
 			{
@@ -35,7 +35,7 @@ bool test_with_json(std::string path)
 
 			size_t num_cycles = object["cycles"].size();
 			std::vector<NESterpiece::BusActivity> bus_activity;
-			for (auto i = 0; i < num_cycles; ++i)
+			for (size_t i = 0; i < num_cycles; ++i)
 			{
 				core.tick_components(12);
 				bus_activity.push_back(core.bus.last_activity);
@@ -49,9 +49,9 @@ bool test_with_json(std::string path)
 				test_failed = true;
 			}
 
-			if (result["s"] != core.cpu.registers.sp)
+			if (result["s"] != core.cpu.registers.s)
 			{
-				fmt::print("sp: {:#x} - expected sp: {:#x}\n", core.cpu.registers.sp, result["s"].get<uint8_t>());
+				fmt::print("sp: {:#x} - expected sp: {:#x}\n", core.cpu.registers.s, result["s"].get<uint8_t>());
 				test_failed = true;
 			}
 
@@ -72,9 +72,9 @@ bool test_with_json(std::string path)
 				fmt::print(" y: {:#x} - expected  y: {:#x}\n", core.cpu.registers.y, result["y"].get<uint8_t>());
 				test_failed = true;
 			}
-			if (result["p"] != core.cpu.registers.sr)
+			if (result["p"] != core.cpu.registers.p)
 			{
-				fmt::print(" p: {:#x} - expected  p: {:#x}\n", core.cpu.registers.sr, result["p"].get<uint8_t>());
+				fmt::print(" p: {:#x} - expected  p: {:#x}\n", core.cpu.registers.p, result["p"].get<uint8_t>());
 				test_failed = true;
 			}
 
@@ -87,7 +87,7 @@ bool test_with_json(std::string path)
 				}
 			}
 
-			for (auto i = 0; i < bus_activity.size(); ++i)
+			for (size_t i = 0; i < bus_activity.size(); ++i)
 			{
 				const auto &act = bus_activity[i];
 				const auto &cycle = object["cycles"][i];
@@ -425,9 +425,112 @@ int flag_tests()
 	return 0;
 }
 
+int transfer_tests()
+{
+	if (!test_with_json("v1/aa.json"))
+		return 1;
+	if (!test_with_json("v1/a8.json"))
+		return 1;
+	if (!test_with_json("v1/ba.json"))
+		return 1;
+	if (!test_with_json("v1/8a.json"))
+		return 1;
+	if (!test_with_json("v1/9a.json"))
+		return 1;
+	if (!test_with_json("v1/98.json"))
+		return 1;
+
+	return 0;
+}
+
+int stack_tests()
+{
+	if (!test_with_json("v1/48.json"))
+		return 1;
+	if (!test_with_json("v1/08.json"))
+		return 1;
+	if (!test_with_json("v1/68.json"))
+		return 1;
+	if (!test_with_json("v1/28.json"))
+		return 1;
+	return 0;
+}
+
+int asl_tests()
+{
+	if (!test_with_json("v1/0a.json"))
+		return 1;
+	if (!test_with_json("v1/06.json"))
+		return 1;
+	if (!test_with_json("v1/16.json"))
+		return 1;
+	if (!test_with_json("v1/0e.json"))
+		return 1;
+	if (!test_with_json("v1/1e.json"))
+		return 1;
+	return 0;
+}
+
+int lsr_tests()
+{
+	if (!test_with_json("v1/4a.json"))
+		return 1;
+	if (!test_with_json("v1/46.json"))
+		return 1;
+	if (!test_with_json("v1/56.json"))
+		return 1;
+	if (!test_with_json("v1/4e.json"))
+		return 1;
+	if (!test_with_json("v1/5e.json"))
+		return 1;
+	return 0;
+}
+
+int rol_tests()
+{
+	if (!test_with_json("v1/2a.json"))
+		return 1;
+	if (!test_with_json("v1/26.json"))
+		return 1;
+	if (!test_with_json("v1/36.json"))
+		return 1;
+	if (!test_with_json("v1/2e.json"))
+		return 1;
+	if (!test_with_json("v1/3e.json"))
+		return 1;
+	return 0;
+}
+
+int ror_tests()
+{
+	if (!test_with_json("v1/6a.json"))
+		return 1;
+	if (!test_with_json("v1/66.json"))
+		return 1;
+	if (!test_with_json("v1/76.json"))
+		return 1;
+	if (!test_with_json("v1/6e.json"))
+		return 1;
+	if (!test_with_json("v1/7e.json"))
+		return 1;
+	return 0;
+}
+
 int main()
 {
 	fmt::print("Starting Tests.\n");
+	if (ror_tests())
+		return 1;
+	if (rol_tests())
+		return 1;
+	if (lsr_tests())
+		return 1;
+	if (asl_tests())
+		return 1;
+	if (stack_tests())
+		return 1;
+	if (transfer_tests())
+		return 1;
 	if (flag_tests())
 		return 1;
 	if (dec_tests())

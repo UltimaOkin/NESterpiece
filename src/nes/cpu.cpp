@@ -7,9 +7,9 @@ namespace NESterpiece
 {
 	void CPU::reset()
 	{
-		ticks = 0;
 		state = ExecutionState{
 			.complete = true,
+			.page_crossed = false,
 			.current_cycle = 0, // after the fetch/decode step
 			.data = 0,
 			.address = 0,
@@ -21,24 +21,18 @@ namespace NESterpiece
 
 	void CPU::step(Bus &bus)
 	{
-		if (ticks == CPU_CLOCK_RATE)
-		{
-			if (!state.complete)
-				(this->*state.addressing_function)(bus);
-			else
-				decode(bus.read(registers.pc));
-
-			ticks = 0;
-		}
-		ticks++;
+		if (!state.complete)
+			(this->*state.addressing_function)(bus);
+		else
+			decode(bus.read(registers.pc));
 	}
 
 	template <TargetValue val>
 	void CPU::op_ld_v(Bus &bus)
 	{
 		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		registers.sr = data == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = data & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+		registers.p = data == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = data & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
 
 		switch (val)
 		{
@@ -51,6 +45,8 @@ namespace NESterpiece
 		case TargetValue::Y:
 			registers.y = data;
 			break;
+		default:
+			return;
 		}
 	}
 
@@ -72,21 +68,21 @@ namespace NESterpiece
 			break;
 		}
 
-		registers.sr = registers.a == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = registers.a & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+		registers.p = registers.a == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = registers.a & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
 	}
 
 	void CPU::op_adc(Bus &bus)
 	{
 		uint16_t data = state.data & 0xFF;
-		uint16_t result = registers.a + data + (registers.sr & StatusFlags::Carry ? 1 : 0);
+		uint16_t result = registers.a + data + (registers.p & StatusFlags::Carry ? 1 : 0);
 
-		registers.sr = result > 0xFF ? registers.sr | StatusFlags::Carry : registers.sr & ~StatusFlags::Carry;
+		registers.p = result > 0xFF ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
 		result &= 0xFF;
 
-		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = result & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
-		registers.sr = ~(registers.a ^ data) & (registers.a ^ result) & 0x80 ? registers.sr | StatusFlags::Overflow : registers.sr & ~StatusFlags::Overflow;
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+		registers.p = ~(registers.a ^ data) & (registers.a ^ result) & 0x80 ? registers.p | StatusFlags::Overflow : registers.p & ~StatusFlags::Overflow;
 
 		registers.a = static_cast<uint8_t>(result);
 	}
@@ -112,28 +108,30 @@ namespace NESterpiece
 		case TargetValue::Y:
 			reg = registers.y;
 			break;
+		default:
+			return;
 		}
 
 		auto data = static_cast<uint8_t>(state.data & 0xFF);
 		uint8_t result = (reg - data) & StatusFlags::Negative;
-		registers.sr &= ~(StatusFlags::Negative | StatusFlags::Zero | StatusFlags::Carry);
+		registers.p &= ~(StatusFlags::Negative | StatusFlags::Zero | StatusFlags::Carry);
 
 		if (reg < data)
-			registers.sr |= result;
+			registers.p |= result;
 		else if (reg == data)
-			registers.sr |= StatusFlags::Zero | StatusFlags::Carry;
+			registers.p |= StatusFlags::Zero | StatusFlags::Carry;
 		else if (reg > data)
-			registers.sr |= result | StatusFlags::Carry;
+			registers.p |= result | StatusFlags::Carry;
 	}
 
 	void CPU::op_bit(Bus &bus)
 	{
 		auto data = static_cast<uint8_t>(state.data & 0xFF);
 		uint8_t result = registers.a & data;
-		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
 
-		registers.sr &= ~(StatusFlags::Negative | StatusFlags::Overflow);
-		registers.sr |= data & 0xC0;
+		registers.p &= ~(StatusFlags::Negative | StatusFlags::Overflow);
+		registers.p |= data & 0xC0;
 	}
 
 	template <TargetValue val>
@@ -151,6 +149,8 @@ namespace NESterpiece
 		case TargetValue::Y:
 			reg = registers.y;
 			break;
+		default:
+			return;
 		}
 		state.data = reg;
 	}
@@ -171,17 +171,19 @@ namespace NESterpiece
 			result = ++registers.y;
 			break;
 		case TargetValue::S:
-			result = ++registers.sp;
+			result = ++registers.s;
 			break;
 		case TargetValue::M:
 			++state.data;
 			state.data &= 0xFF;
 			result = static_cast<uint8_t>(state.data);
 			break;
+		default:
+			return;
 		}
 
-		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = result & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
 	}
 
 	template <TargetValue val>
@@ -200,29 +202,301 @@ namespace NESterpiece
 			result = --registers.y;
 			break;
 		case TargetValue::S:
-			result = --registers.sp;
+			result = --registers.s;
 			break;
 		case TargetValue::M:
 			--state.data;
 			state.data &= 0xFF;
 			result = static_cast<uint8_t>(state.data);
 			break;
+		default:
+			return;
 		}
 
-		registers.sr = result == 0 ? registers.sr | StatusFlags::Zero : registers.sr & ~StatusFlags::Zero;
-		registers.sr = result & StatusFlags::Negative ? registers.sr | StatusFlags::Negative : registers.sr & ~StatusFlags::Negative;
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
 	}
 
 	template <StatusFlags flag>
 	void CPU::op_clear_f(Bus &bus)
 	{
-		registers.sr &= ~flag;
+		registers.p &= ~flag;
 	}
 
 	template <StatusFlags flag>
 	void CPU::op_set_f(Bus &bus)
 	{
-		registers.sr |= flag;
+		registers.p |= flag;
+	}
+
+	template <TargetValue src, TargetValue dst>
+	void CPU::op_transfer_vv(Bus &bus)
+	{
+		uint8_t *src_value = nullptr, *dst_value = nullptr;
+		switch (src)
+		{
+		case TargetValue::A:
+			src_value = &registers.a;
+			break;
+		case TargetValue::X:
+			src_value = &registers.x;
+			break;
+		case TargetValue::Y:
+			src_value = &registers.y;
+			break;
+		case TargetValue::S:
+			src_value = &registers.s;
+			break;
+		default:
+			return;
+		}
+
+		switch (dst)
+		{
+		case TargetValue::A:
+			dst_value = &registers.a;
+			break;
+		case TargetValue::X:
+			dst_value = &registers.x;
+			break;
+		case TargetValue::Y:
+			dst_value = &registers.y;
+			break;
+		case TargetValue::S:
+			dst_value = &registers.s;
+			break;
+		default:
+			return;
+		}
+
+		*dst_value = *src_value;
+
+		if constexpr (dst != TargetValue::S)
+		{
+			registers.p = *dst_value == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+			registers.p = *dst_value & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+		}
+	}
+
+	template <TargetValue val>
+	void CPU::op_push_v(Bus &bus)
+	{
+		switch (val)
+		{
+		case TargetValue::A:
+			state.data = registers.a;
+			break;
+
+		case TargetValue::P:
+			state.data = registers.p | StatusFlags::Break | StatusFlags::Blank;
+			break;
+		default:
+			return;
+		}
+	}
+
+	template <TargetValue val>
+	void CPU::op_pop_v(Bus &bus)
+	{
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			registers.a = state.data;
+			registers.p = registers.a == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+			registers.p = registers.a & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+			break;
+		}
+		case TargetValue::P:
+		{
+			registers.p = (state.data | StatusFlags::Break) & ~StatusFlags::Blank;
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+	}
+
+	template <TargetValue val>
+	void CPU::op_asl_v(Bus &bus)
+	{
+		uint8_t out = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			registers.p = registers.a & 0x80 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			registers.a <<= 1;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			registers.p = state.data & 0x80 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			state.data <<= 1;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_lsr_v(Bus &bus)
+	{
+		uint8_t out = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			registers.p = registers.a & 1 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			registers.a >>= 1;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			registers.p = state.data & 1 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			state.data >>= 1;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p &= ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_rol_v(Bus &bus)
+	{
+		uint8_t out = 0, out_carry = 0;
+
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			out_carry = registers.a & 0x80;
+			registers.a <<= 1;
+			registers.a |= registers.p & StatusFlags::Carry ? 1 : 0;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			out_carry = state.data & 0x80;
+			state.data <<= 1;
+			state.data |= registers.p & StatusFlags::Carry ? 1 : 0;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out_carry ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_ror_v(Bus &bus)
+	{
+		uint8_t out = 0, out_carry = 0;
+
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			out_carry = registers.a & 1;
+			registers.a >>= 1;
+			registers.a |= registers.p & StatusFlags::Carry ? 0x80 : 0;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			out_carry = state.data & 1;
+			state.data >>= 1;
+			state.data |= registers.p & StatusFlags::Carry ? 0x80 : 0;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out_carry ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	void CPU::adm_pha_php(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			bus.read(registers.pc);
+			break;
+		}
+		case 2:
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, state.data);
+			registers.s--;
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
+	}
+
+	void CPU::adm_pla_plp(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			bus.read(registers.pc);
+			break;
+		}
+		case 2:
+		{
+
+			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			registers.s++;
+			break;
+		}
+		case 3:
+		{
+			state.data = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			(this->*state.operation_function)(bus);
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
 	}
 
 	void CPU::adm_implied(Bus &bus)
@@ -1424,7 +1698,7 @@ namespace NESterpiece
 			state.operation_function = &CPU::op_st_v<TargetValue::Y>;
 			break;
 		}
-		// START
+
 		// INC
 		case 0xE6:
 		{
@@ -1562,6 +1836,214 @@ namespace NESterpiece
 		{
 			state.addressing_function = &CPU::adm_implied;
 			state.operation_function = &CPU::op_set_f<StatusFlags::IRQ>;
+			break;
+		}
+
+		// TAX
+		case 0xAA:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_transfer_vv<TargetValue::A, TargetValue::X>;
+			break;
+		}
+
+		// TAY
+		case 0xA8:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_transfer_vv<TargetValue::A, TargetValue::Y>;
+			break;
+		}
+
+		// TSX
+		case 0xBA:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_transfer_vv<TargetValue::S, TargetValue::X>;
+			break;
+		}
+
+		// TXA
+		case 0x8A:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_transfer_vv<TargetValue::X, TargetValue::A>;
+			break;
+		}
+
+		// TXS
+		case 0x9A:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_transfer_vv<TargetValue::X, TargetValue::S>;
+			break;
+		}
+
+		// TYA
+		case 0x98:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_transfer_vv<TargetValue::Y, TargetValue::A>;
+			break;
+		}
+
+		// PHA
+		case 0x48:
+		{
+			state.addressing_function = &CPU::adm_pha_php;
+			state.operation_function = &CPU::op_push_v<TargetValue::A>;
+			break;
+		}
+
+		// PHP
+		case 0x08:
+		{
+			state.addressing_function = &CPU::adm_pha_php;
+			state.operation_function = &CPU::op_push_v<TargetValue::P>;
+			break;
+		}
+
+		// PLA
+		case 0x68:
+		{
+			state.addressing_function = &CPU::adm_pla_plp;
+			state.operation_function = &CPU::op_pop_v<TargetValue::A>;
+			break;
+		}
+
+		// PLP
+		case 0x28:
+		{
+			state.addressing_function = &CPU::adm_pla_plp;
+			state.operation_function = &CPU::op_pop_v<TargetValue::P>;
+			break;
+		}
+
+		// ASL
+		case 0x0A:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_asl_v<TargetValue::A>;
+			break;
+		}
+		case 0x06:
+		{
+			state.addressing_function = &CPU::adm_zero_page_rmw;
+			state.operation_function = &CPU::op_asl_v<TargetValue::M>;
+			break;
+		}
+		case 0x16:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed_rmw;
+			state.operation_function = &CPU::op_asl_v<TargetValue::M>;
+			break;
+		}
+		case 0x0E:
+		{
+			state.addressing_function = &CPU::adm_absolute_rmw;
+			state.operation_function = &CPU::op_asl_v<TargetValue::M>;
+			break;
+		}
+		case 0x1E:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed_rmw;
+			state.operation_function = &CPU::op_asl_v<TargetValue::M>;
+			break;
+		}
+
+		// LSR
+		case 0x4A:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_lsr_v<TargetValue::A>;
+			break;
+		}
+		case 0x46:
+		{
+			state.addressing_function = &CPU::adm_zero_page_rmw;
+			state.operation_function = &CPU::op_lsr_v<TargetValue::M>;
+			break;
+		}
+		case 0x56:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed_rmw;
+			state.operation_function = &CPU::op_lsr_v<TargetValue::M>;
+			break;
+		}
+		case 0x4E:
+		{
+			state.addressing_function = &CPU::adm_absolute_rmw;
+			state.operation_function = &CPU::op_lsr_v<TargetValue::M>;
+			break;
+		}
+		case 0x5E:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed_rmw;
+			state.operation_function = &CPU::op_lsr_v<TargetValue::M>;
+			break;
+		}
+
+		// ROL
+		case 0x2A:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_rol_v<TargetValue::A>;
+			break;
+		}
+		case 0x26:
+		{
+			state.addressing_function = &CPU::adm_zero_page_rmw;
+			state.operation_function = &CPU::op_rol_v<TargetValue::M>;
+			break;
+		}
+		case 0x36:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed_rmw;
+			state.operation_function = &CPU::op_rol_v<TargetValue::M>;
+			break;
+		}
+		case 0x2E:
+		{
+			state.addressing_function = &CPU::adm_absolute_rmw;
+			state.operation_function = &CPU::op_rol_v<TargetValue::M>;
+			break;
+		}
+		case 0x3E:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed_rmw;
+			state.operation_function = &CPU::op_rol_v<TargetValue::M>;
+			break;
+		}
+
+		// ROR
+		case 0x6A:
+		{
+			state.addressing_function = &CPU::adm_implied;
+			state.operation_function = &CPU::op_ror_v<TargetValue::A>;
+			break;
+		}
+		case 0x66:
+		{
+			state.addressing_function = &CPU::adm_zero_page_rmw;
+			state.operation_function = &CPU::op_ror_v<TargetValue::M>;
+			break;
+		}
+		case 0x76:
+		{
+			state.addressing_function = &CPU::adm_zero_page_indexed_rmw;
+			state.operation_function = &CPU::op_ror_v<TargetValue::M>;
+			break;
+		}
+		case 0x6E:
+		{
+			state.addressing_function = &CPU::adm_absolute_rmw;
+			state.operation_function = &CPU::op_ror_v<TargetValue::M>;
+			break;
+		}
+		case 0x7E:
+		{
+			state.addressing_function = &CPU::adm_absolute_indexed_rmw;
+			state.operation_function = &CPU::op_ror_v<TargetValue::M>;
 			break;
 		}
 

@@ -1,12 +1,19 @@
 #include "core.hpp"
+#include "constants.hpp"
 
 namespace NESterpiece
 {
-	void Core::tick_components(int32_t rate)
+	void Core::tick_components(uint32_t rate)
 	{
-		do
+		for (uint32_t i = 0; i < rate; ++i)
 		{
-			cpu.step(bus);
-		} while (rate-- > 0);
+			cpu_counter++;
+
+			if (cpu_counter == CPU_CLOCK_RATE)
+			{
+				cpu_counter = 0;
+				cpu.step(bus);
+			}
+		}
 	}
 }
