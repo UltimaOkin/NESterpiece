@@ -115,13 +115,17 @@ namespace NESterpiece
 		void op_rol_v(Bus &bus);
 		template <TargetValue val>
 		void op_ror_v(Bus &bus);
-
 		template <StatusFlags cond, bool set>
 		void op_branch_cs(Bus &bus);
 
+		void adm_brk(Bus &bus);
+		void adm_rti(Bus &bus);
+		void adm_jsr(Bus &bus);
+		void adm_rts(Bus &bus);
 		void adm_relative(Bus &bus);
 		void adm_pha_php(Bus &bus);
 		void adm_pla_plp(Bus &bus);
+		template <bool is_nop>
 		void adm_implied(Bus &bus);
 		void adm_immediate(Bus &bus);
 		template <InstructionType type>
@@ -134,6 +138,7 @@ namespace NESterpiece
 		void adm_absolute(Bus &bus);
 		void adm_absolute_rmw(Bus &bus);
 		void adm_absolute_jmp(Bus &bus);
+		void adm_absolute_indirect_jmp(Bus &bus);
 		template <TargetValue reg, InstructionType type>
 		void adm_absolute_indexed(Bus &bus);
 		void adm_absolute_indexed_rmw(Bus &bus);

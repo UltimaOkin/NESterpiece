@@ -537,9 +537,31 @@ int branch_tests()
 	return 0;
 }
 
+int jump_tests()
+{
+	if (!test_with_json("v1/6c.json"))
+		return 1;
+	if (!test_with_json("v1/4c.json"))
+		return 1;
+	if (!test_with_json("v1/60.json"))
+		return 1;
+	if (!test_with_json("v1/20.json"))
+		return 1;
+	if (!test_with_json("v1/40.json"))
+		return 1;
+	if (!test_with_json("v1/00.json"))
+		return 1;
+	return 0;
+}
+
 int main()
 {
 	fmt::print("Starting Tests.\n");
+	// NOP
+	if (!test_with_json("v1/ea.json"))
+		return 1;
+	if (jump_tests())
+		return 1;
 	if (branch_tests())
 		return 1;
 	if (ror_tests())

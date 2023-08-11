@@ -458,6 +458,170 @@ namespace NESterpiece
 		state.branch_taken = set ? (registers.p & cond) : !(registers.p & cond);
 	}
 
+	void CPU::adm_brk(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		case 2:
+		{
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc >> 8));
+			registers.s--;
+			break;
+		}
+		case 3:
+		{
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc & 0xFF));
+			registers.s--;
+			break;
+		}
+		case 4:
+		{
+			// determine interrupt vector
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, registers.p | StatusFlags::Break | StatusFlags::Blank);
+			registers.p |= StatusFlags::IRQ;
+			registers.s--;
+			break;
+		}
+		case 5:
+		{
+			state.address = bus.read(0xFFFE);
+			break;
+		}
+		case 6:
+		{
+			state.address |= static_cast<uint16_t>(bus.read(0xFFFF)) << 8;
+			registers.pc = state.address;
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
+	}
+
+	void CPU::adm_rti(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			state.data = bus.read(registers.pc);
+			break;
+		}
+		case 2:
+		{
+			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			registers.s++;
+			break;
+		}
+		case 3:
+		{
+			registers.p = (bus.read(static_cast<uint16_t>(registers.s) | 0x100) | StatusFlags::Break) & ~StatusFlags::Blank;
+			registers.s++;
+			break;
+		}
+		case 4:
+		{
+			state.address = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			registers.s++;
+			break;
+		}
+		case 5:
+		{
+			state.address |= static_cast<uint16_t>(bus.read(static_cast<uint16_t>(registers.s) | 0x100)) << 8;
+			registers.pc = state.address;
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
+	}
+
+	void CPU::adm_jsr(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			state.data = bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		case 2:
+		{
+			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			break;
+		}
+
+		case 3:
+		{
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc >> 8));
+			registers.s--;
+			break;
+		}
+		case 4:
+		{
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc & 0xFF));
+			registers.s--;
+			break;
+		}
+		case 5:
+		{
+			uint16_t pcl = state.data;
+			uint16_t pch = bus.read(registers.pc);
+
+			registers.pc = (pch << 8) | pcl;
+			state.complete = true;
+			break;
+		}
+		}
+
+		state.current_cycle++;
+	}
+
+	void CPU::adm_rts(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			bus.read(registers.pc);
+			break;
+		}
+		case 2:
+		{
+			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			registers.s++;
+			break;
+		}
+		case 3:
+		{
+			state.data = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			registers.s++;
+			break;
+		}
+		case 4:
+		{
+			uint16_t pch = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+			registers.pc = (pch << 8) | state.data;
+			break;
+		}
+		case 5:
+		{
+			bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		}
+
+		state.current_cycle++;
+	}
+
 	void CPU::adm_relative(Bus &bus)
 	{
 		switch (state.current_cycle)
@@ -567,6 +731,7 @@ namespace NESterpiece
 		state.current_cycle++;
 	}
 
+	template <bool is_nop>
 	void CPU::adm_implied(Bus &bus)
 	{
 		switch (state.current_cycle)
@@ -574,7 +739,9 @@ namespace NESterpiece
 		case 1:
 		{
 			bus.read(registers.pc);
-			(this->*state.operation_function)(bus);
+			if constexpr (!is_nop)
+				(this->*state.operation_function)(bus);
+
 			state.complete = true;
 			break;
 		}
@@ -827,6 +994,43 @@ namespace NESterpiece
 		{
 			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
 			registers.pc = state.address;
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
+	}
+
+	void CPU::adm_absolute_indirect_jmp(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			state.address = bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		case 2:
+		{
+			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
+			registers.pc++;
+			break;
+		}
+		case 3:
+		{
+			state.data = bus.read(state.address);
+			break;
+		}
+		case 4:
+		{
+			auto adl = state.address & 0xFF;
+			adl++;
+			adl &= 0xFF;
+			state.address &= 0xFF00;
+			state.address |= adl;
+			state.data |= static_cast<uint16_t>(bus.read(state.address)) << 8;
+			registers.pc = state.data;
 			state.complete = true;
 			break;
 		}
@@ -1797,7 +2001,7 @@ namespace NESterpiece
 		// INX
 		case 0xE8:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_inc_v<TargetValue::X>;
 			break;
 		}
@@ -1805,7 +2009,7 @@ namespace NESterpiece
 		// INY
 		case 0xC8:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_inc_v<TargetValue::Y>;
 			break;
 		}
@@ -1839,7 +2043,7 @@ namespace NESterpiece
 		// DEX
 		case 0xCA:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_dec_v<TargetValue::X>;
 			break;
 		}
@@ -1847,7 +2051,7 @@ namespace NESterpiece
 		// DEY
 		case 0x88:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_dec_v<TargetValue::Y>;
 			break;
 		}
@@ -1855,7 +2059,7 @@ namespace NESterpiece
 		// CLC
 		case 0x18:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_clear_f<StatusFlags::Carry>;
 			break;
 		}
@@ -1863,7 +2067,7 @@ namespace NESterpiece
 		// CLD
 		case 0xD8:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_clear_f<StatusFlags::Decimal>;
 			break;
 		}
@@ -1871,7 +2075,7 @@ namespace NESterpiece
 		// CLI
 		case 0x58:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_clear_f<StatusFlags::IRQ>;
 			break;
 		}
@@ -1879,7 +2083,7 @@ namespace NESterpiece
 		// CLV
 		case 0xB8:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_clear_f<StatusFlags::Overflow>;
 			break;
 		}
@@ -1887,7 +2091,7 @@ namespace NESterpiece
 		// SEC
 		case 0x38:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_set_f<StatusFlags::Carry>;
 			break;
 		}
@@ -1895,7 +2099,7 @@ namespace NESterpiece
 		// SED
 		case 0xF8:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_set_f<StatusFlags::Decimal>;
 			break;
 		}
@@ -1903,7 +2107,7 @@ namespace NESterpiece
 		// SEI
 		case 0x78:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_set_f<StatusFlags::IRQ>;
 			break;
 		}
@@ -1911,7 +2115,7 @@ namespace NESterpiece
 		// TAX
 		case 0xAA:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_transfer_vv<TargetValue::A, TargetValue::X>;
 			break;
 		}
@@ -1919,7 +2123,7 @@ namespace NESterpiece
 		// TAY
 		case 0xA8:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_transfer_vv<TargetValue::A, TargetValue::Y>;
 			break;
 		}
@@ -1927,7 +2131,7 @@ namespace NESterpiece
 		// TSX
 		case 0xBA:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_transfer_vv<TargetValue::S, TargetValue::X>;
 			break;
 		}
@@ -1935,7 +2139,7 @@ namespace NESterpiece
 		// TXA
 		case 0x8A:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_transfer_vv<TargetValue::X, TargetValue::A>;
 			break;
 		}
@@ -1943,7 +2147,7 @@ namespace NESterpiece
 		// TXS
 		case 0x9A:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_transfer_vv<TargetValue::X, TargetValue::S>;
 			break;
 		}
@@ -1951,7 +2155,7 @@ namespace NESterpiece
 		// TYA
 		case 0x98:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_transfer_vv<TargetValue::Y, TargetValue::A>;
 			break;
 		}
@@ -1991,7 +2195,7 @@ namespace NESterpiece
 		// ASL
 		case 0x0A:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_asl_v<TargetValue::A>;
 			break;
 		}
@@ -2023,7 +2227,7 @@ namespace NESterpiece
 		// LSR
 		case 0x4A:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_lsr_v<TargetValue::A>;
 			break;
 		}
@@ -2055,7 +2259,7 @@ namespace NESterpiece
 		// ROL
 		case 0x2A:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_rol_v<TargetValue::A>;
 			break;
 		}
@@ -2087,7 +2291,7 @@ namespace NESterpiece
 		// ROR
 		case 0x6A:
 		{
-			state.addressing_function = &CPU::adm_implied;
+			state.addressing_function = &CPU::adm_implied<false>;
 			state.operation_function = &CPU::op_ror_v<TargetValue::A>;
 			break;
 		}
@@ -2180,6 +2384,53 @@ namespace NESterpiece
 			break;
 		}
 
+		// BRK
+		case 0x00:
+		{
+			state.addressing_function = &CPU::adm_brk;
+			break;
+		}
+
+		// RTI
+		case 0x40:
+		{
+			state.addressing_function = &CPU::adm_rti;
+			break;
+		}
+
+		// JSR
+		case 0x20:
+		{
+			state.addressing_function = &CPU::adm_jsr;
+			break;
+		}
+
+		// RTS
+		case 0x60:
+		{
+			state.addressing_function = &CPU::adm_rts;
+			break;
+		}
+
+		// JMP
+		case 0x4C:
+		{
+			state.addressing_function = &CPU::adm_absolute_jmp;
+			break;
+		}
+		case 0x6C:
+		{
+			state.addressing_function = &CPU::adm_absolute_indirect_jmp;
+			break;
+		}
+
+		// NOP
+		case 0xEA:
+		{
+			state.addressing_function = &CPU::adm_implied<true>;
+			break;
+		}
+
 		default: // Illegal/Unimplemented Opcodes
 		{
 			assert(false);
@@ -2187,5 +2438,4 @@ namespace NESterpiece
 		}
 		}
 	}
-
 }
