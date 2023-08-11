@@ -40,12 +40,21 @@ namespace NESterpiece
 		OR
 	};
 
+	enum class Condition
+	{
+		Carry,
+		Zero,
+		Negative,
+		Overflow
+	};
+
 	class CPU
 	{
 		using cpu_function = void (CPU::*)(Bus &);
 		struct ExecutionState
 		{
 			bool complete = false, page_crossed = false;
+			bool branch_taken = false;
 			uint8_t current_cycle = 0;
 			uint16_t data = 0;
 			uint16_t address = 0;
@@ -55,6 +64,7 @@ namespace NESterpiece
 		ExecutionState state{
 			.complete = true,
 			.page_crossed = false,
+			.branch_taken = false,
 			.current_cycle = 0,
 			.data = 0,
 			.address = 0,
@@ -106,6 +116,10 @@ namespace NESterpiece
 		template <TargetValue val>
 		void op_ror_v(Bus &bus);
 
+		template <StatusFlags cond, bool set>
+		void op_branch_cs(Bus &bus);
+
+		void adm_relative(Bus &bus);
 		void adm_pha_php(Bus &bus);
 		void adm_pla_plp(Bus &bus);
 		void adm_implied(Bus &bus);

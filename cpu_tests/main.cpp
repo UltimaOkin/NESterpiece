@@ -45,7 +45,7 @@ bool test_with_json(std::string path)
 
 			if (result["pc"] != core.cpu.registers.pc)
 			{
-				fmt::print("pc: {:#x} - expected pc: {:#x}\n", core.cpu.registers.pc, result["pc"].get<uint16_t>());
+				fmt::print("pc: {} - expected pc: {}\n", core.cpu.registers.pc, result["pc"].get<uint16_t>());
 				test_failed = true;
 			}
 
@@ -516,9 +516,32 @@ int ror_tests()
 	return 0;
 }
 
+int branch_tests()
+{
+	if (!test_with_json("v1/90.json"))
+		return 1;
+	if (!test_with_json("v1/b0.json"))
+		return 1;
+	if (!test_with_json("v1/f0.json"))
+		return 1;
+	if (!test_with_json("v1/30.json"))
+		return 1;
+	if (!test_with_json("v1/d0.json"))
+		return 1;
+	if (!test_with_json("v1/10.json"))
+		return 1;
+	if (!test_with_json("v1/50.json"))
+		return 1;
+	if (!test_with_json("v1/70.json"))
+		return 1;
+	return 0;
+}
+
 int main()
 {
 	fmt::print("Starting Tests.\n");
+	if (branch_tests())
+		return 1;
 	if (ror_tests())
 		return 1;
 	if (rol_tests())

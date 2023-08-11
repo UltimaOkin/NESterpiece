@@ -10,6 +10,7 @@ namespace NESterpiece
 		state = ExecutionState{
 			.complete = true,
 			.page_crossed = false,
+			.branch_taken = false,
 			.current_cycle = 0, // after the fetch/decode step
 			.data = 0,
 			.address = 0,
@@ -449,6 +450,73 @@ namespace NESterpiece
 		registers.p = out_carry ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
 		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
 		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <StatusFlags cond, bool set>
+	void CPU::op_branch_cs(Bus &bus)
+	{
+		state.branch_taken = set ? (registers.p & cond) : !(registers.p & cond);
+	}
+
+	void CPU::adm_relative(Bus &bus)
+	{
+		switch (state.current_cycle)
+		{
+		case 1:
+		{
+			state.data = bus.read(registers.pc);
+			registers.pc++;
+			break;
+		}
+		case 2:
+		{
+			bus.read(registers.pc);
+			(this->*state.operation_function)(bus);
+			if (state.branch_taken)
+			{
+				uint16_t pcl = registers.pc & 0xFF;
+				int8_t offset = static_cast<int8_t>(state.data & 0xFF);
+				pcl += offset;
+
+				if (pcl > 0xFF)
+					state.page_crossed = true;
+
+				registers.pc &= 0xFF00;
+				registers.pc |= pcl & 0xFF;
+			}
+			else
+			{
+				state.complete = true;
+			}
+			break;
+		}
+		case 3:
+		{
+			bus.read(registers.pc);
+
+			if (state.page_crossed)
+			{
+				uint8_t pch = static_cast<uint8_t>(registers.pc >> 8);
+
+				pch += state.data & 0x80 ? -1 : 1;
+				registers.pc &= 0xFF;
+				registers.pc |= static_cast<uint16_t>(pch) << 8;
+			}
+			else
+			{
+				state.complete = true;
+			}
+
+			break;
+		}
+		case 4:
+		{
+			bus.read(registers.pc);
+			state.complete = true;
+			break;
+		}
+		}
+		state.current_cycle++;
 	}
 
 	void CPU::adm_pha_php(Bus &bus)
@@ -1136,6 +1204,7 @@ namespace NESterpiece
 		state = ExecutionState{
 			.complete = false,
 			.page_crossed = false,
+			.branch_taken = false,
 			.current_cycle = 1,
 			.data = 0,
 			.address = 0,
@@ -2044,6 +2113,70 @@ namespace NESterpiece
 		{
 			state.addressing_function = &CPU::adm_absolute_indexed_rmw;
 			state.operation_function = &CPU::op_ror_v<TargetValue::M>;
+			break;
+		}
+
+		// BCC
+		case 0x90:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Carry, false>;
+			break;
+		}
+
+		// BCS
+		case 0xB0:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Carry, true>;
+			break;
+		}
+
+		// BEQ
+		case 0xF0:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Zero, true>;
+			break;
+		}
+
+		// BMI
+		case 0x30:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Negative, true>;
+			break;
+		}
+
+		// BNE
+		case 0xD0:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Zero, false>;
+			break;
+		}
+
+		// BPL
+		case 0x10:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Negative, false>;
+			break;
+		}
+
+		// BVC
+		case 0x50:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Overflow, false>;
+			break;
+		}
+
+		// BVS
+		case 0x70:
+		{
+			state.addressing_function = &CPU::adm_relative;
+			state.operation_function = &CPU::op_branch_cs<StatusFlags::Overflow, true>;
 			break;
 		}
 
