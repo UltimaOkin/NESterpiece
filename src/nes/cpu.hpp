@@ -1,4 +1,5 @@
 #pragma once
+#include "constants.hpp"
 #include <cinttypes>
 
 namespace NESterpiece
@@ -40,12 +41,12 @@ namespace NESterpiece
 		OR
 	};
 
-	enum class Condition
+	enum class InterruptType
 	{
-		Carry,
-		Zero,
-		Negative,
-		Overflow
+		RESET,
+		NMI,
+		IRQ,
+		BRK
 	};
 
 	class CPU
@@ -54,7 +55,7 @@ namespace NESterpiece
 		struct ExecutionState
 		{
 			bool complete = false, page_crossed = false;
-			bool branch_taken = false;
+			bool branch_taken = false, interrupt = false;
 			uint8_t current_cycle = 0;
 			uint16_t data = 0;
 			uint16_t address = 0;
@@ -65,6 +66,7 @@ namespace NESterpiece
 			.complete = true,
 			.page_crossed = false,
 			.branch_taken = false,
+			.interrupt = false,
 			.current_cycle = 0,
 			.data = 0,
 			.address = 0,
@@ -73,15 +75,16 @@ namespace NESterpiece
 		};
 
 	public:
+		bool nmi_ready = false, irq_ready = false;
+		uint16_t next_interrupt_vector = RESET_VECTOR_START;
 		struct Registers
 		{
+			uint8_t a = 0, x = 0, y = 0, s = 0xFD, p = 0x34;
 			uint16_t pc = 0;
-			uint8_t a = 0, x = 0, y = 0, s = 0xFF, p = 0;
 		} registers;
 
-		void reset();
+		void reset(uint16_t pc);
 		void step(Bus &bus);
-
 		template <TargetValue val>
 		void op_ld_v(Bus &bus);
 		template <BitOp bit_op>
@@ -118,7 +121,8 @@ namespace NESterpiece
 		template <StatusFlags cond, bool set>
 		void op_branch_cs(Bus &bus);
 
-		void adm_brk(Bus &bus);
+		template <InterruptType int_type>
+		void adm_interrupt(Bus &bus);
 		void adm_rti(Bus &bus);
 		void adm_jsr(Bus &bus);
 		void adm_rts(Bus &bus);
@@ -149,6 +153,7 @@ namespace NESterpiece
 		void adm_indirect_indexed_y(Bus &bus);
 		void adm_indirect_indexed_y_rmw(Bus &bus);
 
+		bool check_interrupts();
 		void decode(uint8_t opcode);
 	};
 }

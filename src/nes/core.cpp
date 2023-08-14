@@ -9,7 +9,7 @@ namespace NESterpiece
 		{
 			cpu_counter++;
 
-			if (cpu_counter == CPU_CLOCK_RATE)
+			if (cpu_counter == CPU_CLOCK_DIVIDER)
 			{
 				cpu_counter = 0;
 				cpu.step(bus);

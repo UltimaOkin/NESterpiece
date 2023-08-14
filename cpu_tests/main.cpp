@@ -1,4 +1,5 @@
-#include <nes/core.hpp>
+#include "bus.hpp"
+#include "../src/nes/cpu.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <vector>
@@ -16,73 +17,76 @@ bool test_with_json(std::string path)
 	{
 		auto jdata = json::parse(file);
 		file.close();
+		NESterpiece::CPU cpu{};
+		NESterpiece::Bus bus{};
 		for (const auto &object : jdata)
 		{
 			bool test_failed = false;
 			const auto &initial = object["initial"];
-			NESterpiece::Core core{};
-			core.cpu.registers.pc = initial["pc"];
-			core.cpu.registers.s = initial["s"];
-			core.cpu.registers.a = initial["a"];
-			core.cpu.registers.x = initial["x"];
-			core.cpu.registers.y = initial["y"];
-			core.cpu.registers.p = initial["p"];
+			cpu.reset(0);
+			bus.memory.fill(0);
+			cpu.registers.pc = initial["pc"];
+			cpu.registers.s = initial["s"];
+			cpu.registers.a = initial["a"];
+			cpu.registers.x = initial["x"];
+			cpu.registers.y = initial["y"];
+			cpu.registers.p = initial["p"];
 
 			for (const auto &ram : initial["ram"])
 			{
-				core.bus.memory[ram[0]] = ram[1];
+				bus.memory[ram[0]] = ram[1];
 			}
 
 			size_t num_cycles = object["cycles"].size();
 			std::vector<NESterpiece::BusActivity> bus_activity;
 			for (size_t i = 0; i < num_cycles; ++i)
 			{
-				core.tick_components(12);
-				bus_activity.push_back(core.bus.last_activity);
+				cpu.step(bus);
+				bus_activity.push_back(bus.last_activity);
 			}
 
 			const auto &result = object["final"];
 
-			if (result["pc"] != core.cpu.registers.pc)
+			if (result["pc"] != cpu.registers.pc)
 			{
-				fmt::print("pc: {} - expected pc: {}\n", core.cpu.registers.pc, result["pc"].get<uint16_t>());
+				fmt::print("pc: {} - expected pc: {}\n", cpu.registers.pc, result["pc"].get<uint16_t>());
 				test_failed = true;
 			}
 
-			if (result["s"] != core.cpu.registers.s)
+			if (result["s"] != cpu.registers.s)
 			{
-				fmt::print("sp: {:#x} - expected sp: {:#x}\n", core.cpu.registers.s, result["s"].get<uint8_t>());
+				fmt::print("sp: {:#x} - expected sp: {:#x}\n", cpu.registers.s, result["s"].get<uint8_t>());
 				test_failed = true;
 			}
 
-			if (result["a"] != core.cpu.registers.a)
+			if (result["a"] != cpu.registers.a)
 			{
-				fmt::print(" a: {:#x} - expected  a: {:#x}\n", core.cpu.registers.a, result["a"].get<uint8_t>());
+				fmt::print(" a: {:#x} - expected  a: {:#x}\n", cpu.registers.a, result["a"].get<uint8_t>());
 				test_failed = true;
 			}
 
-			if (result["x"] != core.cpu.registers.x)
+			if (result["x"] != cpu.registers.x)
 			{
-				fmt::print(" x: {:#x} - expected  x: {:#x}\n", core.cpu.registers.x, result["x"].get<uint8_t>());
+				fmt::print(" x: {:#x} - expected  x: {:#x}\n", cpu.registers.x, result["x"].get<uint8_t>());
 				test_failed = true;
 			}
 
-			if (result["y"] != core.cpu.registers.y)
+			if (result["y"] != cpu.registers.y)
 			{
-				fmt::print(" y: {:#x} - expected  y: {:#x}\n", core.cpu.registers.y, result["y"].get<uint8_t>());
+				fmt::print(" y: {:#x} - expected  y: {:#x}\n", cpu.registers.y, result["y"].get<uint8_t>());
 				test_failed = true;
 			}
-			if (result["p"] != core.cpu.registers.p)
+			if (result["p"] != cpu.registers.p)
 			{
-				fmt::print(" p: {:#x} - expected  p: {:#x}\n", core.cpu.registers.p, result["p"].get<uint8_t>());
+				fmt::print(" p: {:#x} - expected  p: {:#x}\n", cpu.registers.p, result["p"].get<uint8_t>());
 				test_failed = true;
 			}
 
 			for (const auto &ram : result["ram"])
 			{
-				if (core.bus.memory[ram[0]] != ram[1])
+				if (bus.memory[ram[0]] != ram[1])
 				{
-					fmt::print("\n{:#x}: {:#x} - expected: {:#x}\n", ram[0].get<uint16_t>(), core.bus.memory[ram[0]], ram[1].get<uint8_t>());
+					fmt::print("\n{:#x}: {:#x} - expected: {:#x}\n", ram[0].get<uint16_t>(), bus.memory[ram[0]], ram[1].get<uint8_t>());
 					test_failed = true;
 				}
 			}

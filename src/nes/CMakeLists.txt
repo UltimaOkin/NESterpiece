@@ -19,4 +19,5 @@ target_sources(NESterpiece-Core PRIVATE
 	core.cpp
 	cpu.cpp
 	bus.cpp
+	cartridge.cpp
 )

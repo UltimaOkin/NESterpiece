@@ -5,7 +5,7 @@
 
 namespace NESterpiece
 {
-	void CPU::reset()
+	void CPU::reset(uint16_t pc)
 	{
 		state = ExecutionState{
 			.complete = true,
@@ -18,6 +18,7 @@ namespace NESterpiece
 			.operation_function = nullptr,
 		};
 		registers = Registers();
+		registers.pc = pc;
 	}
 
 	void CPU::step(Bus &bus)
@@ -25,7 +26,18 @@ namespace NESterpiece
 		if (!state.complete)
 			(this->*state.addressing_function)(bus);
 		else
+		{
+			if (state.interrupt)
+			{
+				if (nmi_ready && next_interrupt_vector == NMI_VECTOR_START)
+					nmi_ready = false;
+				else if (irq_ready && next_interrupt_vector == IRQ_VECTOR_START)
+					irq_ready = false;
+
+				next_interrupt_vector = RESET_VECTOR_START;
+			}
 			decode(bus.read(registers.pc));
+		}
 	}
 
 	template <TargetValue val>
@@ -458,14 +470,16 @@ namespace NESterpiece
 		state.branch_taken = set ? (registers.p & cond) : !(registers.p & cond);
 	}
 
-	void CPU::adm_brk(Bus &bus)
+	template <InterruptType int_type>
+	void CPU::adm_interrupt(Bus &bus)
 	{
 		switch (state.current_cycle)
 		{
 		case 1:
 		{
 			bus.read(registers.pc);
-			registers.pc++;
+			if constexpr (int_type == InterruptType::BRK)
+				registers.pc++;
 			break;
 		}
 		case 2:
@@ -483,19 +497,36 @@ namespace NESterpiece
 		case 4:
 		{
 			// determine interrupt vector
-			bus.write(static_cast<uint16_t>(registers.s) | 0x100, registers.p | StatusFlags::Break | StatusFlags::Blank);
+			if constexpr (int_type == InterruptType::BRK)
+				next_interrupt_vector = BRK_VECTOR_START;
+
+			if (nmi_ready)
+			{
+				next_interrupt_vector = NMI_VECTOR_START;
+				nmi_ready = false;
+			}
+			else if (irq_ready && !(registers.p & StatusFlags::IRQ))
+			{
+				next_interrupt_vector = IRQ_VECTOR_START;
+				irq_ready = false;
+			}
+
+			if constexpr (int_type == InterruptType::BRK)
+				bus.write(static_cast<uint16_t>(registers.s) | 0x100, registers.p | StatusFlags::Break | StatusFlags::Blank);
+			else
+				bus.write(static_cast<uint16_t>(registers.s) | 0x100, (registers.p | StatusFlags::Blank) & ~StatusFlags::Break);
 			registers.p |= StatusFlags::IRQ;
 			registers.s--;
 			break;
 		}
 		case 5:
 		{
-			state.address = bus.read(0xFFFE);
+			state.address = bus.read(next_interrupt_vector);
 			break;
 		}
 		case 6:
 		{
-			state.address |= static_cast<uint16_t>(bus.read(0xFFFF)) << 8;
+			state.address |= static_cast<uint16_t>(bus.read(next_interrupt_vector + 1)) << 8;
 			registers.pc = state.address;
 			state.complete = true;
 			break;
@@ -1403,12 +1434,45 @@ namespace NESterpiece
 		state.current_cycle++;
 	}
 
-	void CPU::decode(uint8_t opcode)
+	bool CPU::check_interrupts()
 	{
 		state = ExecutionState{
 			.complete = false,
 			.page_crossed = false,
 			.branch_taken = false,
+			.interrupt = true,
+			.current_cycle = 1,
+			.data = 0,
+			.address = 0,
+			.addressing_function = nullptr,
+			.operation_function = nullptr,
+		};
+
+		if (nmi_ready)
+		{
+			state.addressing_function = &CPU::adm_interrupt<InterruptType::NMI>;
+			return true;
+		}
+		else if (irq_ready)
+		{
+			state.addressing_function = &CPU::adm_interrupt<InterruptType::IRQ>;
+			return true;
+		}
+
+		return false;
+	}
+
+	void CPU::decode(uint8_t opcode)
+	{
+		// if an interrupt occurs, it will set it's own execution state
+		if (check_interrupts())
+			return;
+
+		state = ExecutionState{
+			.complete = false,
+			.page_crossed = false,
+			.branch_taken = false,
+			.interrupt = false,
 			.current_cycle = 1,
 			.data = 0,
 			.address = 0,
@@ -2387,7 +2451,7 @@ namespace NESterpiece
 		// BRK
 		case 0x00:
 		{
-			state.addressing_function = &CPU::adm_brk;
+			state.addressing_function = &CPU::adm_interrupt<InterruptType::BRK>;
 			break;
 		}
 

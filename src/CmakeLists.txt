@@ -1,1 +1,2 @@
 add_subdirectory(nes)
+add_subdirectory(frontend)
