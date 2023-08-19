@@ -1,5 +1,5 @@
 find_package(fmt CONFIG REQUIRED)
-
+find_package(SDL2 CONFIG REQUIRED)
 add_executable(NESterpiece main.cpp)
 set_target_properties(NESterpiece PROPERTIES
 	CXX_STANDARD 20
@@ -18,5 +18,10 @@ else()
 endif()
 
 target_include_directories(NESterpiece PRIVATE ../)
-target_link_libraries(NESterpiece PRIVATE fmt::fmt)
-target_link_libraries(NESterpiece PRIVATE NESterpiece-Core)
+target_link_libraries(NESterpiece
+	PRIVATE
+	fmt::fmt
+	NESterpiece-Core
+	$<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+	$<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+)

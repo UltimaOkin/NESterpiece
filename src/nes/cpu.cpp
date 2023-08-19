@@ -5,20 +5,20 @@
 
 namespace NESterpiece
 {
-	void CPU::reset(uint16_t pc)
+	void CPU::reset()
 	{
 		state = ExecutionState{
-			.complete = true,
+			.complete = false,
 			.page_crossed = false,
 			.branch_taken = false,
-			.current_cycle = 0, // after the fetch/decode step
+			.interrupt = false,
+			.current_cycle = 1, // after the fetch/decode step
 			.data = 0,
 			.address = 0,
-			.addressing_function = nullptr,
+			.addressing_function = &CPU::adm_interrupt<InterruptType::RESET>,
 			.operation_function = nullptr,
 		};
 		registers = Registers();
-		registers.pc = pc;
 	}
 
 	void CPU::step(Bus &bus)
@@ -499,6 +499,8 @@ namespace NESterpiece
 			// determine interrupt vector
 			if constexpr (int_type == InterruptType::BRK)
 				next_interrupt_vector = BRK_VECTOR_START;
+			else if constexpr (int_type == InterruptType::RESET)
+				next_interrupt_vector = RESET_VECTOR_START;
 
 			if (nmi_ready)
 			{
