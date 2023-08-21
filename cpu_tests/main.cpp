@@ -23,7 +23,7 @@ bool test_with_json(std::string path)
 		{
 			bool test_failed = false;
 			const auto &initial = object["initial"];
-			cpu.reset(0);
+			cpu.reset_to_address(0);
 			bus.memory.fill(0);
 			cpu.registers.pc = initial["pc"];
 			cpu.registers.s = initial["s"];

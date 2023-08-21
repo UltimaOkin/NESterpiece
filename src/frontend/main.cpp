@@ -4,11 +4,20 @@
 #include <nes/ppu.hpp>
 #include <SDL.h>
 #include <array>
+#include <chrono>
+
+constexpr std::chrono::nanoseconds set_update_frequency_hz(size_t hz)
+{
+	using namespace std::chrono_literals;
+	constexpr std::chrono::nanoseconds nanoseconds_per_hertz = 1000000000ns;
+	// framerate was inconsistent without this adjustment
+	return nanoseconds_per_hertz / hz + 1ns;
+}
 
 int main(int argc, char **argv)
 {
 	using namespace NESterpiece;
-
+	using namespace std::chrono_literals;
 	if (argc < 2)
 	{
 		fmt::print("No rom provided.");
@@ -25,7 +34,7 @@ int main(int argc, char **argv)
 	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "vulkan");
 #endif
 
-	SDL_Window *window = SDL_CreateWindow("NESterpiece", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 480, SDL_WINDOW_RESIZABLE);
+	SDL_Window *window = SDL_CreateWindow("NESterpiece", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512, 480, SDL_WINDOW_RESIZABLE);
 	SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 	SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, 256, 240);
 
@@ -36,6 +45,11 @@ int main(int argc, char **argv)
 
 	bool running = true;
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+
+	constexpr std::chrono::nanoseconds max_step_delay = 33ms;
+	constexpr auto logic_rate = set_update_frequency_hz(60);
+	auto accumulator = 0ns, sram_accumulator = 0ns;
+	auto old_time = std::chrono::steady_clock::now();
 
 	while (running)
 	{
@@ -61,7 +75,21 @@ int main(int argc, char **argv)
 			}
 		}
 
-		core.tick_components(1);
+		auto time_now = std::chrono::steady_clock::now();
+		auto full_delta = time_now - old_time;
+		old_time = time_now;
+
+		if (full_delta > max_step_delay)
+			full_delta = max_step_delay;
+
+		accumulator += full_delta;
+
+		if (accumulator >= logic_rate)
+		{
+			core.tick_until_vblank();
+
+			accumulator -= logic_rate;
+		}
 
 		SDL_Rect src{};
 		src.y = 0;

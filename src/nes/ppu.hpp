@@ -2,16 +2,18 @@
 #include <cinttypes>
 #include <array>
 #include <vector>
+#include <tuple>
+
 namespace NESterpiece
 {
 	class Core;
 	enum CtrlFlags
 	{
-		NametableAddressBits = 3,
-		AddressIncrement = 4,
-		SpritePatternAddress = 8,
+		NametableSelectCtrl = 3,
+		VramIncrement = 4,
+		OAMPatternAddress = 8,
 		BGPatternAddress = 16,
-		SpriteSize = 32,
+		OAMSize = 32,
 		EnableNMI = 128,
 	};
 
@@ -37,33 +39,64 @@ namespace NESterpiece
 		CoarseX = 0b11111,
 		CoarseY = 0b11111 << 5,
 		NametableSelect = 0b11 << 10,
+		NametableX = 0b1 << 10,
+		NametableY = 0b1 << 11,
 		FineY = 0b111 << 12,
 	};
 
-	struct TileFetcher
+	struct FetcherState
 	{
-		uint8_t step = 0;
-		uint8_t nametable = 0, attribute = 0, low = 0, high = 0;
+		uint8_t nametable_tile = 0, tile_attribute = 0, low = 0, high = 0;
 	};
+
+	struct BGShiftRegister
+	{
+		uint16_t low = 0, high = 0;
+	};
+
+	struct ObjectShiftRegister
+	{
+		uint8_t pattern_low = 0, pattern_high = 0;
+		uint8_t attribute = 0, x_position = 0;
+	};
+
 	class PPU
 	{
-		bool write_toggle = false;
+		bool write_toggle = false, _vblank_started = false;
 		uint8_t fine_x_scroll = 0;
 		uint16_t v = 0, t = 0;
 		uint16_t cycles = 0;
-		TileFetcher fetcher;
+		FetcherState fetcher;
+		BGShiftRegister bg_pixels, bg_attributes;
+		std::array<ObjectShiftRegister, 8> oam_shifters{};
 		uint16_t scanline_num = 0;
+		Core &core;
 
 	public:
-		uint8_t ctrl = 0, mask = 0, status = 0;
+		uint8_t ctrl = 0, mask = 0, status = 128;
 		uint8_t oam_address = 0, oam_data = 0;
 		uint8_t address = 0, data = 0, dma_address = 0;
-		std::array<uint8_t, 0x800> nametables{};
+		std::array<uint8_t, 0x20> palette_memory{};
 		std::array<uint32_t, 256 * 240> framebuffer{};
+		std::array<uint8_t, 0x100> oam{};
+		std::array<uint8_t, 0x20> secondary_oam{};
 
-		void step(Core &core);
+		PPU(Core &core) : core(core) {}
+
+		void step();
+		void run_fetcher();
+		void increment_x();
+		void increment_y();
+		void copy_x();
+		void copy_y();
 		void increment_vram();
+		bool rendering_enabled() const;
+		bool vblank_started();
+
 		uint8_t cpu_read(uint16_t address);
 		void cpu_write(uint16_t address, uint16_t value);
+		std::tuple<uint8_t, bool> ppu_read(uint16_t address);
+		uint8_t ppu_read_v(uint16_t addr);
+		void ppu_write(uint16_t address, uint8_t value);
 	};
 }

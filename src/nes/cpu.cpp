@@ -5,6 +5,23 @@
 
 namespace NESterpiece
 {
+	void CPU::reset_to_address(uint16_t pc)
+	{
+		state = ExecutionState{
+			.complete = true,
+			.page_crossed = false,
+			.branch_taken = false,
+			.interrupt = false,
+			.current_cycle = 0, // after the fetch/decode step
+			.data = 0,
+			.address = 0,
+			.addressing_function = nullptr,
+			.operation_function = nullptr,
+		};
+		registers = Registers();
+		registers.pc = pc;
+	}
+
 	void CPU::reset()
 	{
 		state = ExecutionState{
@@ -648,6 +665,7 @@ namespace NESterpiece
 		{
 			bus.read(registers.pc);
 			registers.pc++;
+			state.complete = true;
 			break;
 		}
 		}

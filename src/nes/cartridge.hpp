@@ -104,10 +104,15 @@ namespace NESterpiece
 	public:
 		INESHeader header;
 		Cartridge(INESHeader &&header) : header(std::move(header)) {}
+
 		virtual uint8_t read(uint16_t address) = 0;
 		virtual void write(uint16_t address, uint8_t value) = 0;
 		virtual uint8_t read_chr(uint16_t address) = 0;
 		virtual uint8_t read_chr(uint16_t pattern_table_half, uint16_t tile_id, uint16_t bit_plane, uint16_t fine_y) = 0;
+		virtual void write_chr(uint16_t address, uint8_t value) = 0;
+		virtual uint8_t read_nametable(uint16_t address) = 0;
+		virtual void write_nametable(uint16_t address, uint8_t value) = 0;
+
 		static std::shared_ptr<Cartridge> from_file(std::string path);
 	};
 
@@ -117,6 +122,7 @@ namespace NESterpiece
 		std::array<uint8_t, 32768> prg_rom{};
 		std::array<uint8_t, 8192> prg_ram{};
 		std::array<uint8_t, 8192> chr_rom{};
+		std::array<uint8_t, 2048> nametables{};
 
 		NROM(INESHeader &&header, std::ifstream stream);
 
@@ -124,5 +130,8 @@ namespace NESterpiece
 		void write(uint16_t address, uint8_t value) override;
 		uint8_t read_chr(uint16_t address) override;
 		uint8_t read_chr(uint16_t pattern_table_half, uint16_t tile_id, uint16_t bit_plane, uint16_t fine_y) override;
+		void write_chr(uint16_t address, uint8_t value) override;
+		uint8_t read_nametable(uint16_t address) override;
+		void write_nametable(uint16_t address, uint8_t value) override;
 	};
 }

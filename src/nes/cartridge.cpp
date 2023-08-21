@@ -55,19 +55,18 @@ namespace NESterpiece
 
 	uint8_t NROM::read(uint16_t address)
 	{
-		if (within_range(address, 0x6000, 0x7FFF))
+		if (within_range<uint16_t>(address, 0x6000, 0x7FFF))
 		{
 			return prg_ram[address - 0x6000];
 		}
-		else if (within_range(address, 0x8000, 0xBFFF))
+		else if (within_range<uint16_t>(address, 0x8000, 0xBFFF))
 		{
 			return prg_rom[address - 0x8000];
 		}
-		else if (within_range(address, 0xC000, 0xFFFF))
+		else if (within_range<uint16_t>(address, 0xC000, 0xFFFF))
 		{
-			uint16_t offset = header.chr_rom_low_byte == 2 ? 0x8000 : 0xC000;
-			uint16_t faddr = address - offset;
-			auto ret = prg_rom.at(address - offset);
+			const uint16_t offset = header.prg_rom_low_byte == 2 ? 0x8000 : 0xC000;
+			auto ret = prg_rom[address - offset];
 			return ret;
 		}
 
@@ -76,7 +75,7 @@ namespace NESterpiece
 
 	void NROM::write(uint16_t address, uint8_t value)
 	{
-		if (within_range(address, 0x6000, 0x7FFF))
+		if (within_range<uint16_t>(address, 0x6000, 0x7FFF))
 		{
 			prg_ram[address - 0x6000] = value;
 		}
@@ -97,5 +96,58 @@ namespace NESterpiece
 		uint16_t address = (pattern_table_half << 12) | (tile_id << 4) | (bit_plane << 3) | fine_y;
 
 		return read_chr(address);
+	}
+
+	void NROM::write_chr(uint16_t address, uint8_t value)
+	{
+		// not supported on NROM
+	}
+
+	uint8_t NROM::read_nametable(uint16_t address)
+	{
+		if (header.flags_6.mirror())
+		{
+			if (within_range<uint16_t>(address, 0x800, 0xBFF))
+				address -= 0x800;
+			else if (within_range<uint16_t>(address, 0xC00, 0xFFF))
+				address -= 0x800;
+
+			return nametables[address];
+		}
+		else
+		{
+			if (within_range<uint16_t>(address, 0x0400, 0x07FF))
+				address -= 0x400;
+			else if (within_range<uint16_t>(address, 0x0800, 0x0BFF))
+				address -= 0x400;
+			else if (within_range<uint16_t>(address, 0x0C00, 0x0FFF))
+				address -= 0x800;
+
+			return nametables[address];
+		}
+	}
+
+	void NROM::write_nametable(uint16_t address, uint8_t value)
+	{
+		if (header.flags_6.mirror())
+		{
+			if (within_range<uint16_t>(address, 0x800, 0xBFF))
+				address -= 0x800;
+			else if (within_range<uint16_t>(address, 0xC00, 0xFFF))
+				address -= 0x800;
+
+			nametables[address] = value;
+		}
+		else
+		{
+			if (within_range<uint16_t>(address, 0x0400, 0x07FF))
+				address -= 0x400;
+			else if (within_range<uint16_t>(address, 0x0800, 0x0BFF))
+				address -= 0x400;
+			else if (within_range<uint16_t>(address, 0x0C00, 0x0FFF))
+				address -= 0x800;
+
+			nametables[address] = value;
+		}
 	}
 }

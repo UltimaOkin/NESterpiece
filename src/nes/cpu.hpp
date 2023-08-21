@@ -83,6 +83,7 @@ namespace NESterpiece
 			uint16_t pc = 0;
 		} registers;
 
+		void reset_to_address(uint16_t pc);
 		void reset();
 		void step(Bus &bus);
 		template <TargetValue val>

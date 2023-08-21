@@ -15,5 +15,6 @@ namespace NESterpiece
 		Bus bus;
 		Core();
 		void tick_components(uint32_t rate);
+		void tick_until_vblank();
 	};
 }
