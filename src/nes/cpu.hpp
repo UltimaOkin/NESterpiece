@@ -1,4 +1,5 @@
 #pragma once
+#include "oam.hpp"
 #include "constants.hpp"
 #include <cinttypes>
 
@@ -82,6 +83,8 @@ namespace NESterpiece
 			uint8_t a = 0, x = 0, y = 0, s = 0xFD, p = 0x34;
 			uint16_t pc = 0;
 		} registers;
+
+		OAMDMA oam_dma;
 
 		void reset_to_address(uint16_t pc);
 		void reset();

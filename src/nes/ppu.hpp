@@ -44,6 +44,14 @@ namespace NESterpiece
 		FineY = 0b111 << 12,
 	};
 
+	enum ObjectAttribute
+	{
+		Palette = 3,
+		Priority = 32,
+		FlipX = 64,
+		FlipY = 128,
+	};
+
 	struct FetcherState
 	{
 		uint8_t nametable_tile = 0, tile_attribute = 0, low = 0, high = 0;
@@ -64,26 +72,28 @@ namespace NESterpiece
 	{
 		bool write_toggle = false, _vblank_started = false;
 		uint8_t fine_x_scroll = 0;
+		uint8_t num_objects = 0;
 		uint16_t v = 0, t = 0;
 		uint16_t cycles = 0;
+		uint16_t scanline_num = 0;
 		FetcherState fetcher;
 		BGShiftRegister bg_pixels, bg_attributes;
 		std::array<ObjectShiftRegister, 8> oam_shifters{};
-		uint16_t scanline_num = 0;
 		Core &core;
 
 	public:
 		uint8_t ctrl = 0, mask = 0, status = 128;
-		uint8_t oam_address = 0, oam_data = 0;
-		uint8_t address = 0, data = 0, dma_address = 0;
+		uint8_t oam_address = 0;
+		uint8_t address = 0, data = 0;
+		uint32_t frame_num = 0;
 		std::array<uint8_t, 0x20> palette_memory{};
-		std::array<uint32_t, 256 * 240> framebuffer{};
 		std::array<uint8_t, 0x100> oam{};
-		std::array<uint8_t, 0x20> secondary_oam{};
+		std::array<uint32_t, 256 * 240> framebuffer{};
 
 		PPU(Core &core) : core(core) {}
 
 		void step();
+		void sprite_eval();
 		void run_fetcher();
 		void increment_x();
 		void increment_y();

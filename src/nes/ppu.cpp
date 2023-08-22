@@ -16,7 +16,9 @@ namespace NESterpiece
 					run_fetcher();
 
 				if (cycles == 256)
+				{
 					increment_y();
+				}
 
 				if (cycles == 257)
 					copy_x();
@@ -39,6 +41,49 @@ namespace NESterpiece
 						lookup = ppu_read_v(0x3F00);
 
 					framebuffer[(scanline_num * 256) + (cycles - 1)] = Palette2C02[lookup];
+
+					uint16_t m = num_objects;
+					for (auto i = 0; i < m; ++i)
+					{
+						auto &shifter = oam_shifters.at(i);
+
+						if (shifter.x_position > 0)
+						{
+							shifter.x_position--;
+						}
+						else
+						{
+							const uint8_t pixel_attribute = shifter.attribute & 0x3;
+							uint8_t pixel_low = 0;
+							uint8_t pixel_high = 0;
+
+							if (shifter.attribute & ObjectAttribute::FlipX)
+							{
+								pixel_low = shifter.pattern_low & 1;
+								pixel_high = shifter.pattern_high & 1;
+								shifter.pattern_low >>= 1;
+								shifter.pattern_high >>= 1;
+							}
+							else
+							{
+								pixel_low = (shifter.pattern_low >> 7) & 1;
+								pixel_high = (shifter.pattern_high >> 7) & 1;
+								shifter.pattern_low <<= 1;
+								shifter.pattern_high <<= 1;
+							}
+
+							const uint8_t pixel = (pixel_high << 1) | pixel_low;
+
+							uint8_t lookup = ppu_read_v((0x3F10 + (pixel_attribute << 2) + pixel));
+							if (pixel > 0)
+								framebuffer[(scanline_num * 256) + (cycles - 1)] = Palette2C02[lookup];
+						}
+					}
+
+					if (mask & MaskFlags::ShowSprites && cycles == 256)
+					{
+						sprite_eval();
+					}
 				}
 			}
 		}
@@ -47,6 +92,7 @@ namespace NESterpiece
 		{
 			status |= PPUStatusFlags::VBlank;
 			_vblank_started = true;
+			frame_num++;
 			if (ctrl & CtrlFlags::EnableNMI)
 				core.cpu.nmi_ready = true;
 		}
@@ -56,7 +102,7 @@ namespace NESterpiece
 			status &= ~PPUStatusFlags::VBlank;
 		}
 
-		if (cycles == 341)
+		if (cycles == 340)
 		{
 			cycles = 0;
 			scanline_num = ++scanline_num % 262;
@@ -64,6 +110,50 @@ namespace NESterpiece
 		else
 		{
 			cycles++;
+		}
+	}
+
+	void PPU::sprite_eval()
+	{
+		const uint16_t scanline = scanline_num + 1;
+		const bool large_sprites = ctrl & CtrlFlags::OAMSize;
+		const uint16_t height = large_sprites ? 16 : 8;
+
+		num_objects = 0;
+		for (size_t i = 0; i < oam.size() / 4; ++i)
+		{
+			if (num_objects == 8)
+				break;
+
+			const uint16_t y_pos = oam[i * 4];
+
+			if (y_pos <= scanline && (y_pos + height) > scanline)
+			{
+				const uint8_t attribute = oam[(i * 4) + 2];
+				oam_shifters[num_objects].x_position = oam[(i * 4) + 3];
+				oam_shifters[num_objects].attribute = attribute;
+
+				uint8_t tile = oam[(i * 4) + 1];
+				uint8_t pattern_table = ctrl & CtrlFlags::OAMPatternAddress;
+
+				if (large_sprites)
+				{
+					pattern_table = tile & 1;
+					tile = tile & (~1);
+				}
+
+				if (attribute & ObjectAttribute::FlipY)
+				{
+					oam_shifters[num_objects].pattern_low = core.bus.cart->read_chr(pattern_table, tile, 0, (height - 1) - (scanline - y_pos));
+					oam_shifters[num_objects].pattern_high = core.bus.cart->read_chr(pattern_table, tile, 1, (height - 1) - (scanline - y_pos));
+				}
+				else
+				{
+					oam_shifters[num_objects].pattern_low = core.bus.cart->read_chr(pattern_table, tile, 0, scanline - y_pos);
+					oam_shifters[num_objects].pattern_high = core.bus.cart->read_chr(pattern_table, tile, 1, scanline - y_pos);
+				}
+				num_objects++;
+			}
 		}
 	}
 
@@ -100,14 +190,18 @@ namespace NESterpiece
 		}
 		case 4:
 		{
-			const uint16_t address = ((ctrl & CtrlFlags::BGPatternAddress) << 8) + ((uint16_t)fetcher.nametable_tile << 4) | ((v & VramMask::FineY) >> 12);
-			fetcher.low = ppu_read_v(address);
+			const auto pattern_table = static_cast<uint16_t>(ctrl & CtrlFlags::BGPatternAddress) << 8;
+			const auto tile = static_cast<uint16_t>(fetcher.nametable_tile) << 4;
+			const uint16_t fine_y = (v & VramMask::FineY) >> 12;
+			fetcher.low = ppu_read_v(pattern_table + tile | fine_y);
 			break;
 		}
 		case 6:
 		{
-			const uint16_t address = ((ctrl & CtrlFlags::BGPatternAddress) << 8) + ((uint16_t)fetcher.nametable_tile << 4) | ((v & VramMask::FineY) >> 12);
-			fetcher.high = ppu_read_v(address + 8);
+			const auto pattern_table = static_cast<uint16_t>(ctrl & CtrlFlags::BGPatternAddress) << 8;
+			const auto tile = static_cast<uint16_t>(fetcher.nametable_tile) << 4;
+			const uint16_t fine_y = (v & VramMask::FineY) >> 12;
+			fetcher.high = ppu_read_v((pattern_table + tile | fine_y) + 8);
 			break;
 		}
 		case 7:
@@ -210,7 +304,7 @@ namespace NESterpiece
 		}
 		case 0x4:
 		{
-			return oam_data;
+			return oam[oam_address];
 		}
 		case 0x7:
 		{
@@ -250,7 +344,12 @@ namespace NESterpiece
 		}
 		case 0x4:
 		{
-			oam_data = value;
+			if (frame_num == 4)
+			{
+				int dummy = 0;
+			}
+			oam[oam_address] = value;
+			oam_address++;
 			return;
 		}
 		case 0x5:

@@ -21,4 +21,5 @@ target_sources(NESterpiece-Core PRIVATE
 	bus.cpp
 	cartridge.cpp
 	ppu.cpp
+	oam.cpp
 )
