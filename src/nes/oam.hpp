@@ -15,6 +15,7 @@ namespace NESterpiece
 		bool put_cycle = false, active = false;
 		uint8_t data = 0;
 		uint16_t address = 0, address_snap = 0;
+
 		void start(uint8_t page);
 		void step(Bus &bus, PPU &ppu);
 	};

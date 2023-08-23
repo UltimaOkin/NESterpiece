@@ -64,25 +64,25 @@ namespace NESterpiece
 
 	struct ObjectShiftRegister
 	{
-		uint8_t pattern_low = 0, pattern_high = 0;
+		bool is_sprite0 = false;
 		uint8_t attribute = 0, x_position = 0;
+		uint8_t pattern_low = 0, pattern_high = 0;
 	};
 
 	class PPU
 	{
-		bool write_toggle = false, _vblank_started = false;
+		bool write_toggle = false, _frame_ended = false, odd = false;
 		uint8_t fine_x_scroll = 0;
-		uint8_t num_objects = 0;
 		uint16_t v = 0, t = 0;
 		uint16_t cycles = 0;
 		uint16_t scanline_num = 0;
 		FetcherState fetcher;
 		BGShiftRegister bg_pixels, bg_attributes;
-		std::array<ObjectShiftRegister, 8> oam_shifters{};
+		std::vector<ObjectShiftRegister> oam_shifters{};
 		Core &core;
 
 	public:
-		uint8_t ctrl = 0, mask = 0, status = 128;
+		uint8_t ctrl = 0, mask = 0, status = PPUStatusFlags::VBlank | PPUStatusFlags::SpriteOverflow;
 		uint8_t oam_address = 0;
 		uint8_t address = 0, data = 0;
 		uint32_t frame_num = 0;
@@ -90,7 +90,8 @@ namespace NESterpiece
 		std::array<uint8_t, 0x100> oam{};
 		std::array<uint32_t, 256 * 240> framebuffer{};
 
-		PPU(Core &core) : core(core) {}
+		PPU(Core &core);
+		void reset();
 
 		void step();
 		void sprite_eval();
@@ -101,7 +102,7 @@ namespace NESterpiece
 		void copy_y();
 		void increment_vram();
 		bool rendering_enabled() const;
-		bool vblank_started();
+		bool frame_ended();
 
 		uint8_t cpu_read(uint16_t address);
 		void cpu_write(uint16_t address, uint16_t value);

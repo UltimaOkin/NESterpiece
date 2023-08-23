@@ -35,13 +35,12 @@ int main(int argc, char **argv)
 #endif
 
 	SDL_Window *window = SDL_CreateWindow("NESterpiece", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512, 480, SDL_WINDOW_RESIZABLE);
-	SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 	SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, 256, 240);
 
 	auto cart = Cartridge::from_file(argv[1]);
 	Core core{};
-	core.bus.cart = cart;
-	core.cpu.reset();
+	core.reset(cart);
 
 	bool running = true;
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);

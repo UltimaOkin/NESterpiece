@@ -5,6 +5,8 @@
 #include <vector>
 namespace NESterpiece
 {
+	Cartridge::Cartridge(INESHeader &&header) : header(std::move(header)) {}
+
 	std::shared_ptr<Cartridge> Cartridge::from_file(std::string path)
 	{
 		constexpr std::array<char, 4> TARGET_MAGIC{

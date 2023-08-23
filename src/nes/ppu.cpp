@@ -6,6 +6,29 @@
 
 namespace NESterpiece
 {
+	PPU::PPU(Core &core) : core(core)
+	{
+	}
+
+	void PPU::reset()
+	{
+		write_toggle = _frame_ended = odd = false;
+		fine_x_scroll = 0;
+		v = t = cycles = scanline_num = 0;
+		fetcher = FetcherState{};
+		bg_pixels = BGShiftRegister{};
+		bg_attributes = BGShiftRegister{};
+		oam_shifters.clear();
+
+		ctrl = mask = 0;
+		status = PPUStatusFlags::VBlank | PPUStatusFlags::SpriteOverflow;
+		oam_address = address = data = 0;
+		frame_num = 0;
+		palette_memory.fill(0);
+		oam.fill(0);
+		framebuffer.fill(0);
+	}
+
 	void PPU::step()
 	{
 		if (within_range<uint16_t>(scanline_num, 0, 239) || (scanline_num == 261))
@@ -30,59 +53,87 @@ namespace NESterpiece
 				{
 					const uint8_t pixel_low = (bg_pixels.low >> (15 - fine_x_scroll)) & 1;
 					const uint8_t pixel_high = (bg_pixels.high >> (15 - fine_x_scroll)) & 1;
-					const uint8_t pixel = (pixel_high << 1) | pixel_low;
+					const uint8_t bg_pixel = (pixel_high << 1) | pixel_low;
 
 					const uint8_t attribute_low = (bg_attributes.low >> (15 - fine_x_scroll)) & 1;
 					const uint8_t attribute_high = (bg_attributes.high >> (15 - fine_x_scroll)) & 1;
 					const uint8_t pixel_attribute = (attribute_high << 1) | attribute_low;
 
-					uint8_t lookup = ppu_read_v((0x3F00 + (pixel_attribute << 2) + pixel));
-					if (pixel == 0)
+					uint8_t lookup = ppu_read_v((0x3F00 + (pixel_attribute << 2) + bg_pixel));
+					if (bg_pixel == 0)
 						lookup = ppu_read_v(0x3F00);
 
-					framebuffer[(scanline_num * 256) + (cycles - 1)] = Palette2C02[lookup];
+					const uint16_t x_pos = cycles - 1;
+					bool check_sprite0 = x_pos != 255;
 
-					uint16_t m = num_objects;
-					for (auto i = 0; i < m; ++i)
+					if ((mask & MaskFlags::ShowBGOnLeft) == 0)
 					{
-						auto &shifter = oam_shifters.at(i);
-
-						if (shifter.x_position > 0)
+						if (x_pos > 7)
 						{
-							shifter.x_position--;
+							framebuffer[(scanline_num * 256) + x_pos] = Palette2C02[lookup];
 						}
 						else
 						{
-							const uint8_t pixel_attribute = shifter.attribute & 0x3;
-							uint8_t pixel_low = 0;
-							uint8_t pixel_high = 0;
+							framebuffer[(scanline_num * 256) + x_pos] = 0x000000FF;
+							check_sprite0 = false;
+						}
+					}
+					else
+					{
+						framebuffer[(scanline_num * 256) + x_pos] = Palette2C02[lookup];
+					}
 
-							if (shifter.attribute & ObjectAttribute::FlipX)
+					if (mask & MaskFlags::ShowSprites)
+					{
+						for (auto &shifter : oam_shifters)
+						{
+							if (shifter.x_position > 0)
 							{
-								pixel_low = shifter.pattern_low & 1;
-								pixel_high = shifter.pattern_high & 1;
-								shifter.pattern_low >>= 1;
-								shifter.pattern_high >>= 1;
+								shifter.x_position--;
 							}
 							else
 							{
-								pixel_low = (shifter.pattern_low >> 7) & 1;
-								pixel_high = (shifter.pattern_high >> 7) & 1;
-								shifter.pattern_low <<= 1;
-								shifter.pattern_high <<= 1;
+								const uint8_t pixel_attribute = shifter.attribute & 0x3;
+								uint8_t pixel_low = 0;
+								uint8_t pixel_high = 0;
+
+								if (shifter.attribute & ObjectAttribute::FlipX)
+								{
+									pixel_low = shifter.pattern_low & 1;
+									pixel_high = shifter.pattern_high & 1;
+									shifter.pattern_low >>= 1;
+									shifter.pattern_high >>= 1;
+								}
+								else
+								{
+									pixel_low = (shifter.pattern_low >> 7) & 1;
+									pixel_high = (shifter.pattern_high >> 7) & 1;
+									shifter.pattern_low <<= 1;
+									shifter.pattern_high <<= 1;
+								}
+
+								const uint8_t pixel = (pixel_high << 1) | pixel_low;
+
+								uint8_t lookup = ppu_read_v((0x3F10 + (pixel_attribute << 2) + pixel));
+
+								if (((mask & MaskFlags::ShowSpritesOnLeft) == 0) && (x_pos < 8))
+									continue;
+
+								if (pixel > 0)
+								{
+									if (bg_pixel > 0 && shifter.is_sprite0 && x_pos >= 2)
+										status |= PPUStatusFlags::Sprite0Hit;
+
+									if ((shifter.attribute & ObjectAttribute::Priority) == 0 || bg_pixel == 0)
+										framebuffer[(scanline_num * 256) + (cycles - 1)] = Palette2C02[lookup];
+								}
 							}
-
-							const uint8_t pixel = (pixel_high << 1) | pixel_low;
-
-							uint8_t lookup = ppu_read_v((0x3F10 + (pixel_attribute << 2) + pixel));
-							if (pixel > 0)
-								framebuffer[(scanline_num * 256) + (cycles - 1)] = Palette2C02[lookup];
 						}
-					}
 
-					if (mask & MaskFlags::ShowSprites && cycles == 256)
-					{
-						sprite_eval();
+						if (cycles == 256)
+						{
+							sprite_eval();
+						}
 					}
 				}
 			}
@@ -91,21 +142,27 @@ namespace NESterpiece
 		if (scanline_num == 241 && cycles == 1)
 		{
 			status |= PPUStatusFlags::VBlank;
-			_vblank_started = true;
-			frame_num++;
+
 			if (ctrl & CtrlFlags::EnableNMI)
 				core.cpu.nmi_ready = true;
 		}
 
 		if (scanline_num == 261 && cycles == 1)
 		{
-			status &= ~PPUStatusFlags::VBlank;
+			status &= ~(PPUStatusFlags::VBlank | PPUStatusFlags::Sprite0Hit | PPUStatusFlags::SpriteOverflow);
 		}
 
 		if (cycles == 340)
 		{
 			cycles = 0;
 			scanline_num = ++scanline_num % 262;
+			if (scanline_num == 0)
+			{
+				_frame_ended = true;
+				frame_num++;
+				cycles = (odd && rendering_enabled()) ? 1 : 0;
+				odd = !odd;
+			}
 		}
 		else
 		{
@@ -115,23 +172,28 @@ namespace NESterpiece
 
 	void PPU::sprite_eval()
 	{
-		const uint16_t scanline = scanline_num + 1;
+		const uint16_t scanline = scanline_num;
 		const bool large_sprites = ctrl & CtrlFlags::OAMSize;
 		const uint16_t height = large_sprites ? 16 : 8;
 
-		num_objects = 0;
-		for (size_t i = 0; i < oam.size() / 4; ++i)
+		oam_shifters.clear();
+		for (size_t i = 0, num_objects = 0; i < oam.size() / 4; ++i)
 		{
-			if (num_objects == 8)
+			if (oam_shifters.size() == 9)
 				break;
 
 			const uint16_t y_pos = oam[i * 4];
 
 			if (y_pos <= scanline && (y_pos + height) > scanline)
 			{
-				const uint8_t attribute = oam[(i * 4) + 2];
-				oam_shifters[num_objects].x_position = oam[(i * 4) + 3];
-				oam_shifters[num_objects].attribute = attribute;
+
+				ObjectShiftRegister shifter{
+					.is_sprite0 = i == 0,
+					.attribute = oam[(i * 4) + 2],
+					.x_position = oam[(i * 4) + 3],
+					.pattern_low = 0,
+					.pattern_high = 0,
+				};
 
 				uint8_t tile = oam[(i * 4) + 1];
 				uint8_t pattern_table = ctrl & CtrlFlags::OAMPatternAddress;
@@ -142,17 +204,24 @@ namespace NESterpiece
 					tile = tile & (~1);
 				}
 
-				if (attribute & ObjectAttribute::FlipY)
+				if (shifter.attribute & ObjectAttribute::FlipY)
 				{
-					oam_shifters[num_objects].pattern_low = core.bus.cart->read_chr(pattern_table, tile, 0, (height - 1) - (scanline - y_pos));
-					oam_shifters[num_objects].pattern_high = core.bus.cart->read_chr(pattern_table, tile, 1, (height - 1) - (scanline - y_pos));
+					shifter.pattern_low = core.bus.cart->read_chr(pattern_table, tile, 0, (height - 1) - (scanline - y_pos));
+					shifter.pattern_high = core.bus.cart->read_chr(pattern_table, tile, 1, (height - 1) - (scanline - y_pos));
 				}
 				else
 				{
-					oam_shifters[num_objects].pattern_low = core.bus.cart->read_chr(pattern_table, tile, 0, scanline - y_pos);
-					oam_shifters[num_objects].pattern_high = core.bus.cart->read_chr(pattern_table, tile, 1, scanline - y_pos);
+					shifter.pattern_low = core.bus.cart->read_chr(pattern_table, tile, 0, scanline - y_pos);
+					shifter.pattern_high = core.bus.cart->read_chr(pattern_table, tile, 1, scanline - y_pos);
 				}
-				num_objects++;
+
+				oam_shifters.push_back(std::move(shifter));
+			}
+
+			if (oam_shifters.size() > 8)
+			{
+				oam_shifters.pop_back();
+				status |= PPUStatusFlags::SpriteOverflow;
 			}
 		}
 	}
@@ -280,10 +349,10 @@ namespace NESterpiece
 		return (mask & MaskFlags::ShowBG) || (mask & MaskFlags::ShowSprites);
 	}
 
-	bool PPU::vblank_started()
+	bool PPU::frame_ended()
 	{
-		bool result = _vblank_started;
-		_vblank_started = false;
+		bool result = _frame_ended;
+		_frame_ended = false;
 		return result;
 	}
 

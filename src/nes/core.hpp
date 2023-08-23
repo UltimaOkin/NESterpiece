@@ -3,8 +3,10 @@
 #include "bus.hpp"
 #include "ppu.hpp"
 #include <cinttypes>
+#include <memory>
 namespace NESterpiece
 {
+	class Cartridge;
 	class Core
 	{
 		uint8_t cpu_counter = 0, ppu_counter = 0;
@@ -14,6 +16,7 @@ namespace NESterpiece
 		PPU ppu;
 		Bus bus;
 		Core();
+		void reset(std::shared_ptr<Cartridge> cart);
 		void tick_components(uint32_t rate);
 		void tick_until_vblank();
 	};

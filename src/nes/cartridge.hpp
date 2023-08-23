@@ -103,7 +103,8 @@ namespace NESterpiece
 	{
 	public:
 		INESHeader header;
-		Cartridge(INESHeader &&header) : header(std::move(header)) {}
+		Cartridge(INESHeader &&header);
+		virtual ~Cartridge() = default;
 
 		virtual uint8_t read(uint16_t address) = 0;
 		virtual void write(uint16_t address, uint8_t value) = 0;
