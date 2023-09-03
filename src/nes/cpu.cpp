@@ -20,6 +20,10 @@ namespace NESterpiece
 		};
 		registers = Registers();
 		registers.pc = pc;
+		registers.s = 0xFD;
+		next_interrupt_vector = RESET_VECTOR_START;
+		nmi_ready = false;
+		irq_ready = false;
 	}
 
 	void CPU::reset()
@@ -36,6 +40,9 @@ namespace NESterpiece
 			.operation_function = nullptr,
 		};
 		registers = Registers();
+		next_interrupt_vector = RESET_VECTOR_START;
+		nmi_ready = false;
+		irq_ready = false;
 	}
 
 	void CPU::step(Bus &bus)
@@ -1473,7 +1480,7 @@ namespace NESterpiece
 			state.addressing_function = &CPU::adm_interrupt<InterruptType::NMI>;
 			return true;
 		}
-		else if (irq_ready)
+		else if (irq_ready && !(registers.p & StatusFlags::IRQ))
 		{
 			state.addressing_function = &CPU::adm_interrupt<InterruptType::IRQ>;
 			return true;

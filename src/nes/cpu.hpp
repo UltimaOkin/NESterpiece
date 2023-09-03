@@ -80,7 +80,7 @@ namespace NESterpiece
 		uint16_t next_interrupt_vector = RESET_VECTOR_START;
 		struct Registers
 		{
-			uint8_t a = 0, x = 0, y = 0, s = 0xFD, p = 0x34;
+			uint8_t a = 0, x = 0, y = 0, s = 0xFF, p = 0x34;
 			uint16_t pc = 0;
 		} registers;
 

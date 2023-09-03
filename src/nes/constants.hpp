@@ -3,6 +3,8 @@
 #include <array>
 namespace NESterpiece
 {
+	constexpr int32_t SCREEN_WIDTH = 256;
+	constexpr int32_t SCREEN_HEIGHT = 240;
 	constexpr int8_t CPU_CLOCK_DIVIDER = 12;
 	constexpr int8_t PPU_CLOCK_DIVIDER = 4;
 	constexpr uint16_t NMI_VECTOR_START = 0xFFFA;
@@ -81,8 +83,8 @@ namespace NESterpiece
 		0x000000FF};
 
 	template <class T>
-	constexpr bool within_range(T address, T start, T end)
+	constexpr bool within_range(T value, T start, T end)
 	{
-		return ((address >= start) && (address <= end));
+		return ((value >= start) && (value <= end));
 	}
 }

@@ -25,7 +25,13 @@ namespace NESterpiece
 		}
 		else if (within_range<uint16_t>(address, 0x4000, 0x4017))
 		{
-			return 0;
+			switch (address & 0xFF)
+			{
+			case 0x16:
+				return pad.read_and_shift();
+			default:
+				return 0;
+			}
 		}
 		else if (within_range<uint16_t>(address, 0x4020, 0xFFFF))
 		{
@@ -57,9 +63,14 @@ namespace NESterpiece
 		}
 		else if (within_range<uint16_t>(address, 0x4000, 0x4017))
 		{
-			if (address == 0x4014)
+			switch (address & 0xFF)
 			{
+			case 0x14:
 				oam_dma.start(value);
+				break;
+			case 0x16:
+				pad.write(value);
+				break;
 			}
 		}
 		else if (within_range<uint16_t>(address, 0x4020, 0xFFFF))

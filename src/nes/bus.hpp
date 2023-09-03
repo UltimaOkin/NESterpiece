@@ -1,4 +1,5 @@
 #pragma once
+#include "pad.hpp"
 #include <cinttypes>
 #include <array>
 #include <memory>
@@ -27,6 +28,7 @@ namespace NESterpiece
 
 	public:
 		BusActivity activity;
+		StdController pad;
 		Bus(PPU &ppu, OAMDMA &oam_dma) : ppu(ppu), oam_dma(oam_dma) {}
 		std::array<uint8_t, 0x800> internal_ram{};
 		std::shared_ptr<Cartridge> cart{};

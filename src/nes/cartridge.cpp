@@ -38,7 +38,8 @@ namespace NESterpiece
 		rom_file.read(reinterpret_cast<char *>(&header.num_misc_roms), 1);
 		rom_file.read(reinterpret_cast<char *>(&header.default_expansion_device), 1);
 
-		switch (header.combined_mapper_id())
+		auto mapper = header.combined_mapper_id();
+		switch (mapper)
 		{
 		case 0:
 			return std::make_shared<NROM>(std::move(header), std::move(rom_file));
@@ -78,9 +79,7 @@ namespace NESterpiece
 	void NROM::write(uint16_t address, uint8_t value)
 	{
 		if (within_range<uint16_t>(address, 0x6000, 0x7FFF))
-		{
 			prg_ram[address - 0x6000] = value;
-		}
 	}
 
 	uint8_t NROM::read_chr(uint16_t address)

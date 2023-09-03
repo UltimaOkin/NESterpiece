@@ -142,7 +142,7 @@ namespace NESterpiece
 		if (scanline_num == 241 && cycles == 1)
 		{
 			status |= PPUStatusFlags::VBlank;
-
+			_frame_ended = true;
 			if (ctrl & CtrlFlags::EnableNMI)
 				core.cpu.nmi_ready = true;
 		}
@@ -158,7 +158,7 @@ namespace NESterpiece
 			scanline_num = ++scanline_num % 262;
 			if (scanline_num == 0)
 			{
-				_frame_ended = true;
+				total_frame_cycles = 0;
 				frame_num++;
 				cycles = (odd && rendering_enabled()) ? 1 : 0;
 				odd = !odd;
@@ -166,6 +166,7 @@ namespace NESterpiece
 		}
 		else
 		{
+			total_frame_cycles++;
 			cycles++;
 		}
 	}
@@ -179,13 +180,16 @@ namespace NESterpiece
 		oam_shifters.clear();
 		for (size_t i = 0, num_objects = 0; i < oam.size() / 4; ++i)
 		{
-			if (oam_shifters.size() == 9)
-				break;
 
 			const uint16_t y_pos = oam[i * 4];
 
 			if (y_pos <= scanline && (y_pos + height) > scanline)
 			{
+				if (oam_shifters.size() == 8)
+				{
+					status |= PPUStatusFlags::SpriteOverflow;
+					break;
+				}
 
 				ObjectShiftRegister shifter{
 					.is_sprite0 = i == 0,
@@ -216,12 +220,6 @@ namespace NESterpiece
 				}
 
 				oam_shifters.push_back(std::move(shifter));
-			}
-
-			if (oam_shifters.size() > 8)
-			{
-				oam_shifters.pop_back();
-				status |= PPUStatusFlags::SpriteOverflow;
 			}
 		}
 	}

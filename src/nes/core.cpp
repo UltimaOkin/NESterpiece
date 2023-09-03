@@ -10,9 +10,9 @@ namespace NESterpiece
 
 	void Core::reset(std::shared_ptr<Cartridge> cart)
 	{
+		bus.cart = std::move(cart);
 		cpu.reset();
 		ppu.reset();
-		bus.cart = std::move(cart);
 	}
 
 	void Core::tick_components(uint32_t rate)
@@ -32,7 +32,6 @@ namespace NESterpiece
 			{
 				cpu_counter = 0;
 
-				// if oamdma is running then the CPU does nothing
 				cpu.oam_dma.step(bus, ppu);
 				if (!cpu.oam_dma.active)
 					cpu.step(bus);
@@ -55,8 +54,6 @@ namespace NESterpiece
 			if (cpu_counter == CPU_CLOCK_DIVIDER)
 			{
 				cpu_counter = 0;
-
-				// if oamdma is running then the CPU does nothing
 				cpu.oam_dma.step(bus, ppu);
 				if (!cpu.oam_dma.active)
 					cpu.step(bus);

@@ -11,10 +11,9 @@ namespace NESterpiece
 		data = 0;
 		total_cycles = 1;
 		bytes_left = 256;
+
 		if (put_cycle)
-		{
 			alignment++;
-		}
 	}
 
 	void OAMDMA::step(Bus &bus, PPU &ppu)
@@ -27,25 +26,27 @@ namespace NESterpiece
 		if (alignment > 0)
 		{
 			--alignment;
-			put_cycle = !put_cycle;
-			return;
 		}
-
-		if (active)
+		else
 		{
-			if (bytes_left == 0)
+			if (active)
 			{
-				active = false;
-				return;
-			}
-			if (put_cycle)
-			{
-				ppu.cpu_write(0x2004, data);
-				--bytes_left;
-			}
-			else
-			{
-				data = bus.read(address++);
+				if (bytes_left == 0)
+				{
+					active = false;
+				}
+				else
+				{
+					if (put_cycle)
+					{
+						ppu.cpu_write(0x2004, data);
+						--bytes_left;
+					}
+					else
+					{
+						data = bus.read(address++);
+					}
+				}
 			}
 		}
 

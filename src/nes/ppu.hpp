@@ -71,21 +71,22 @@ namespace NESterpiece
 
 	class PPU
 	{
-		bool write_toggle = false, _frame_ended = false, odd = false;
-		uint8_t fine_x_scroll = 0;
-		uint16_t v = 0, t = 0;
-		uint16_t cycles = 0;
-		uint16_t scanline_num = 0;
-		FetcherState fetcher;
-		BGShiftRegister bg_pixels, bg_attributes;
-		std::vector<ObjectShiftRegister> oam_shifters{};
 		Core &core;
 
 	public:
+		bool write_toggle = false, _frame_ended = false, odd = false;
+		uint8_t fine_x_scroll = 0;
 		uint8_t ctrl = 0, mask = 0, status = PPUStatusFlags::VBlank | PPUStatusFlags::SpriteOverflow;
 		uint8_t oam_address = 0;
 		uint8_t address = 0, data = 0;
-		uint32_t frame_num = 0;
+		uint16_t v = 0, t = 0;
+		uint16_t cycles = 0;
+		uint16_t scanline_num = 0;
+		uint32_t frame_num = 0, total_frame_cycles = 0;
+
+		FetcherState fetcher;
+		BGShiftRegister bg_pixels, bg_attributes;
+		std::vector<ObjectShiftRegister> oam_shifters{};
 		std::array<uint8_t, 0x20> palette_memory{};
 		std::array<uint8_t, 0x100> oam{};
 		std::array<uint32_t, 256 * 240> framebuffer{};
