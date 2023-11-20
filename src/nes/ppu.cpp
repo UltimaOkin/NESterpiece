@@ -27,6 +27,24 @@ namespace NESterpiece
 		palette_memory.fill(0);
 		oam.fill(0);
 		framebuffer.fill(0);
+		w2006_cycles = 0;
+		w2006_delay = false;
+	}
+
+	void PPU::update_snapshot()
+	{
+		snapshot.cycles = cycles;
+		snapshot.frame_num = frame_num;
+		snapshot.total_frame_cycles = total_frame_cycles;
+		snapshot.scanline = scanline_num;
+		snapshot.v = v;
+		snapshot.t = t;
+		snapshot.fine_x = fine_x_scroll;
+		snapshot.write_toggle = write_toggle;
+		snapshot.control = ctrl;
+		snapshot.status = status;
+		snapshot.mask = mask;
+		snapshot.oam_address = oam_address;
 	}
 
 	void PPU::step()
@@ -35,6 +53,7 @@ namespace NESterpiece
 		{
 			if (rendering_enabled())
 			{
+
 				if (within_range<uint16_t>(cycles, 1, 256) || within_range<uint16_t>(cycles, 321, 336))
 					run_fetcher();
 
@@ -74,13 +93,16 @@ namespace NESterpiece
 						}
 						else
 						{
-							framebuffer[(scanline_num * 256) + x_pos] = 0x000000FF;
+							framebuffer[(scanline_num * 256) + x_pos] = Palette2C02[0];
 							check_sprite0 = false;
 						}
 					}
 					else
 					{
-						framebuffer[(scanline_num * 256) + x_pos] = Palette2C02[lookup];
+						if (mask & MaskFlags::ShowBG)
+							framebuffer[(scanline_num * 256) + x_pos] = Palette2C02[lookup];
+						else
+							framebuffer[(scanline_num * 256) + x_pos] = Palette2C02[0];
 					}
 
 					if (mask & MaskFlags::ShowSprites)
@@ -129,14 +151,14 @@ namespace NESterpiece
 								}
 							}
 						}
-
-						if (cycles == 256)
-						{
-							sprite_eval();
-						}
 					}
 				}
 			}
+		}
+
+		if (cycles == 256 && within_range<uint16_t>(scanline_num, 0, 239))
+		{
+			sprite_eval();
 		}
 
 		if (scanline_num == 241 && cycles == 1)
@@ -149,8 +171,24 @@ namespace NESterpiece
 
 		if (scanline_num == 261 && cycles == 1)
 		{
+			oam_shifters.clear();
 			status &= ~(PPUStatusFlags::VBlank | PPUStatusFlags::Sprite0Hit | PPUStatusFlags::SpriteOverflow);
 		}
+
+		check_snapshots();
+
+		if (w2006_delay && w2006_cycles == 3)
+		{
+			v = t;
+			w2006_delay = false;
+		}
+		else
+		{
+			w2006_cycles++;
+		}
+
+		if (cycles == 339 && scanline_num == 261 && odd && rendering_enabled())
+			cycles++;
 
 		if (cycles == 340)
 		{
@@ -158,16 +196,38 @@ namespace NESterpiece
 			scanline_num = ++scanline_num % 262;
 			if (scanline_num == 0)
 			{
+				odd = !odd;
 				total_frame_cycles = 0;
 				frame_num++;
-				cycles = (odd && rendering_enabled()) ? 1 : 0;
-				odd = !odd;
 			}
 		}
 		else
 		{
 			total_frame_cycles++;
 			cycles++;
+		}
+	}
+
+	void PPU::check_snapshots()
+	{
+		switch (update_event)
+		{
+		case SnapshotEvent::OnFrame:
+		{
+			if (frame_num == trigger_frame)
+			{
+				update_snapshot();
+			}
+			break;
+		}
+		case SnapshotEvent::OnScanlineCycle:
+		{
+			if (scanline_num == trigger_scanline && cycles == trigger_cycle)
+			{
+				update_snapshot();
+			}
+			break;
+		}
 		}
 	}
 
@@ -231,9 +291,9 @@ namespace NESterpiece
 		bg_attributes.low <<= 1;
 		bg_attributes.high <<= 1;
 
-		switch ((cycles - 1) & 7)
+		switch (cycles & 7)
 		{
-		case 0:
+		case 1:
 		{
 			bg_pixels.low |= fetcher.low;
 			bg_pixels.high |= fetcher.high;
@@ -244,7 +304,7 @@ namespace NESterpiece
 			fetcher.nametable_tile = ppu_read_v(0x2000 | (v & 0x0FFF));
 			break;
 		}
-		case 2:
+		case 3:
 		{
 			const uint8_t attribute = ppu_read_v(0x23C0 | (v & 0x0C00) | ((v >> 4) & 0x38) | ((v >> 2) & 0x07));
 			const uint8_t row = ((v & VramMask::CoarseY) >> 4) & 0x4;
@@ -255,7 +315,7 @@ namespace NESterpiece
 			fetcher.tile_attribute = (attribute >> (row | column)) & 0x3;
 			break;
 		}
-		case 4:
+		case 5:
 		{
 			const auto pattern_table = static_cast<uint16_t>(ctrl & CtrlFlags::BGPatternAddress) << 8;
 			const auto tile = static_cast<uint16_t>(fetcher.nametable_tile) << 4;
@@ -263,16 +323,12 @@ namespace NESterpiece
 			fetcher.low = ppu_read_v(pattern_table + tile | fine_y);
 			break;
 		}
-		case 6:
+		case 7:
 		{
 			const auto pattern_table = static_cast<uint16_t>(ctrl & CtrlFlags::BGPatternAddress) << 8;
 			const auto tile = static_cast<uint16_t>(fetcher.nametable_tile) << 4;
 			const uint16_t fine_y = (v & VramMask::FineY) >> 12;
 			fetcher.high = ppu_read_v((pattern_table + tile | fine_y) + 8);
-			break;
-		}
-		case 7:
-		{
 			increment_x();
 			break;
 		}
@@ -395,8 +451,15 @@ namespace NESterpiece
 		{
 		case 0x0:
 		{
+
+			if ((value & CtrlFlags::EnableNMI) && ((ctrl & CtrlFlags::EnableNMI) == 0))
+			{
+				if (status & PPUStatusFlags::VBlank)
+					core.cpu.nmi_ready = true;
+			}
 			ctrl = value;
 			t = (t & ~VramMask::NametableSelect) | ((value & 0b11) << 10);
+
 			return;
 		}
 		case 0x1:
@@ -427,6 +490,7 @@ namespace NESterpiece
 			}
 			else
 			{
+
 				fine_x_scroll = value & 0b111;
 				t = (t & ~0b11111) | (value >> 3);
 			}
@@ -439,7 +503,9 @@ namespace NESterpiece
 			if (write_toggle)
 			{
 				t = (t & 0b1111111100000000) | value;
-				v = t;
+				w2006_delay = true;
+				w2006_cycles = 0;
+				// v = t;
 			}
 			else
 			{

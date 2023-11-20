@@ -1,5 +1,6 @@
 #include "menu.hpp"
 #include "../config.hpp"
+
 namespace NESterpiece
 {
 	void MenuController::toggle_settings(MenuSelect menu)
@@ -18,12 +19,6 @@ namespace NESterpiece
 		menu_bar.draw(state, *this);
 		settings.draw_menu(menu_bar.height);
 
-		using namespace ImGui;
-
-		if (Begin("PPU", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-		{
-			Text("V: 0x0000; T: 0x0000;");
-		}
-		End();
+		p_diag.draw(state);
 	}
 }

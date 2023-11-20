@@ -57,7 +57,9 @@ int main(int argc, char **argv)
 	EmulationState state{window};
 
 	state.initialize(renderer);
-
+	state.core.ppu.update_event = SnapshotEvent::OnScanlineCycle;
+	state.core.ppu.trigger_cycle = 0;
+	state.core.ppu.trigger_scanline = 0;
 	ControllerHandler::open();
 	while (running && !menu.menu_bar.ready_to_exit)
 	{

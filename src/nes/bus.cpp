@@ -3,18 +3,38 @@
 #include "cartridge.hpp"
 #include "ppu.hpp"
 #include "oam.hpp"
+#include "core.hpp"
 #include "constants.hpp"
 
 namespace NESterpiece
 {
+
 	uint8_t Bus::read(uint16_t address)
 	{
+		core.tick_components(true);
 		activity = {
 			.value = 0,
 			.address = address,
 			.type = BusActivityType::Read,
 		};
 
+		return read_no_tick(address);
+	}
+
+	void Bus::write(uint16_t address, uint8_t value)
+	{
+		core.tick_components(false);
+		activity = {
+			.value = value,
+			.address = address,
+			.type = BusActivityType::Write,
+		};
+
+		write_no_tick(address, value);
+	}
+
+	uint8_t Bus::read_no_tick(uint16_t address)
+	{
 		if (within_range<uint16_t>(address, 0, 0x7FF) || within_range<uint16_t>(address, 0x800, 0xFFF) || within_range<uint16_t>(address, 0x1000, 0x17FF) || within_range<uint16_t>(address, 0x1800, 0x1FFF))
 		{
 			return activity.value = internal_ram[address & 0x7FF];
@@ -41,14 +61,8 @@ namespace NESterpiece
 
 		return 0;
 	}
-
-	void Bus::write(uint16_t address, uint8_t value)
+	void Bus::write_no_tick(uint16_t address, uint8_t value)
 	{
-		activity = {
-			.value = value,
-			.address = address,
-			.type = BusActivityType::Write,
-		};
 
 		if (within_range<uint16_t>(address, 0, 0x7FF) ||
 			within_range<uint16_t>(address, 0x800, 0xFFF) ||
@@ -78,5 +92,4 @@ namespace NESterpiece
 			cart->write(address, value);
 		}
 	}
-
 }

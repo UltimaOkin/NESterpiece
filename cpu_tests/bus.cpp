@@ -9,6 +9,13 @@ namespace NESterpiece
 			.value = memory[address],
 			.type = BusActivityType::Read,
 		};
+		activity_list.push_back(last_activity);
+
+		if (address == 40939)
+		{
+			int d = 0;
+		}
+
 		return memory[address];
 	}
 
@@ -20,5 +27,8 @@ namespace NESterpiece
 			.value = value,
 			.type = BusActivityType::Write,
 		};
+
+		activity_list.push_back(last_activity);
 	}
+
 }

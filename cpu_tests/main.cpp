@@ -23,8 +23,10 @@ bool test_with_json(std::string path)
 		{
 			bool test_failed = false;
 			const auto &initial = object["initial"];
+
 			cpu.reset_to_address(0);
 			bus.memory.fill(0);
+			bus.activity_list.clear();
 			cpu.registers.pc = initial["pc"];
 			cpu.registers.s = initial["s"];
 			cpu.registers.a = initial["a"];
@@ -38,13 +40,13 @@ bool test_with_json(std::string path)
 			}
 
 			size_t num_cycles = object["cycles"].size();
-			std::vector<NESterpiece::BusActivity> bus_activity;
-			for (size_t i = 0; i < num_cycles; ++i)
+
+			if (object["name"] == "90 91 aa")
 			{
-				cpu.step(bus);
-				bus_activity.push_back(bus.last_activity);
+				int d = 0;
 			}
 
+			cpu.step(bus);
 			const auto &result = object["final"];
 
 			if (result["pc"] != cpu.registers.pc)
@@ -90,11 +92,37 @@ bool test_with_json(std::string path)
 					test_failed = true;
 				}
 			}
-
-			for (size_t i = 0; i < bus_activity.size(); ++i)
+			bool bad_cycles = false;
+			if (bus.activity_list.size() != object["cycles"].size())
 			{
-				const auto &act = bus_activity[i];
-				const auto &cycle = object["cycles"][i];
+				fmt::print("Incorrect number of cycles taken: {} - expected: {}\n", bus.activity_list.size(), object["cycles"].size());
+
+				for (int i = 0; i < bus.activity_list.size(); ++i)
+				{
+					const auto &act = bus.activity_list.at(i);
+					constexpr std::array<std::string_view, 2> rw{
+						"read",
+						"write",
+					};
+					fmt::print("\ncycle: {}\n", i + 1);
+					fmt::print("bus address: {}\n", act.address);
+					fmt::print("value: {}\n", act.value);
+					fmt::print("operation: {}\n\n", rw[act.type]);
+				}
+
+				test_failed = true;
+				bad_cycles = true;
+			}
+
+			const auto &name = object["name"].get<std::string>();
+
+			for (size_t i = 0; i < bus.activity_list.size(); ++i)
+			{
+				if (i >= num_cycles)
+					break;
+
+				const auto &act = bus.activity_list.at(i);
+				const auto &cycle = object["cycles"].at(i);
 				constexpr std::array<std::string_view, 2> rw{
 					"read",
 					"write",
@@ -105,8 +133,8 @@ bool test_with_json(std::string path)
 					(rw[act.type] != cycle[2].get<std::string>()))
 				{
 					fmt::print("\ncycle: {}\n", i + 1);
-					fmt::print("bus address: {:#x} - expected: {:#x}\n", act.address, cycle[0].get<uint16_t>());
-					fmt::print("value: {:#x} - expected: {:#x}\n", act.value, cycle[1].get<uint8_t>());
+					fmt::print("bus address: {} - expected: {}\n", act.address, cycle[0].get<uint16_t>());
+					fmt::print("value: {} - expected: {}\n", act.value, cycle[1].get<uint8_t>());
 					fmt::print("operation: {}, expected: {}\n", rw[act.type], cycle[2].get<std::string>());
 					test_failed = true;
 				}
@@ -114,7 +142,7 @@ bool test_with_json(std::string path)
 
 			if (test_failed)
 			{
-				fmt::print("[{}]\n", object["name"].get<std::string>());
+				fmt::print("[{}]\n", name);
 				return false;
 			}
 		}
@@ -561,13 +589,18 @@ int jump_tests()
 int main()
 {
 	fmt::print("Starting Tests.\n");
+
 	// NOP
 	if (!test_with_json("v1/ea.json"))
 		return 1;
 	if (jump_tests())
 		return 1;
+
+	// ---
+
 	if (branch_tests())
 		return 1;
+
 	if (ror_tests())
 		return 1;
 	if (rol_tests())

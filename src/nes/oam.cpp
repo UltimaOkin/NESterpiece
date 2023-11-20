@@ -44,7 +44,7 @@ namespace NESterpiece
 					}
 					else
 					{
-						data = bus.read(address++);
+						data = bus.read_no_tick(address++);
 					}
 				}
 			}

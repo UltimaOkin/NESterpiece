@@ -1,0 +1,10 @@
+input = []
+recent_rom_paths = []
+
+[emulation]
+allow_sram_saving = true
+sram_save_interval = 15
+
+[video]
+keep_aspect_ratio = true
+linear_filtering = false

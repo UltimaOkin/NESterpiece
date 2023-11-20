@@ -16,6 +16,7 @@ if(imgui_FOUND AND fmt_FOUND AND SDL2_FOUND AND SDL2_mixer_FOUND)
 		menu/settings_menu.cpp
 		menu/input_menu.cpp
 		menu/emulation_menu.cpp
+		menu/diagnostics.cpp
 	)
 	set_target_properties(NESterpiece PROPERTIES
 		CXX_STANDARD 20

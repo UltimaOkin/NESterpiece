@@ -55,20 +55,15 @@ namespace NESterpiece
 		using cpu_function = void (CPU::*)(Bus &);
 		struct ExecutionState
 		{
-			bool complete = false, page_crossed = false;
-			bool branch_taken = false, interrupt = false;
-			uint8_t current_cycle = 0;
+			bool branch_taken = false;
 			uint16_t data = 0;
 			uint16_t address = 0;
 			cpu_function addressing_function = nullptr, operation_function = nullptr;
 		};
 
 		ExecutionState state{
-			.complete = true,
-			.page_crossed = false,
 			.branch_taken = false,
-			.interrupt = false,
-			.current_cycle = 0,
+			//	.page_crossed = true,
 			.data = 0,
 			.address = 0,
 			.addressing_function = nullptr,
@@ -76,14 +71,14 @@ namespace NESterpiece
 		};
 
 	public:
-		bool nmi_ready = false, irq_ready = false;
+		bool nmi_ready = false, irq_ready = false, reset_pulled = true;
 		uint16_t next_interrupt_vector = RESET_VECTOR_START;
 		struct Registers
 		{
 			uint8_t a = 0, x = 0, y = 0, s = 0xFF, p = 0x34;
 			uint16_t pc = 0;
 		} registers;
-
+		uint32_t clock = 0;
 		OAMDMA oam_dma;
 
 		void reset_to_address(uint16_t pc);

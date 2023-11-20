@@ -17,7 +17,7 @@ namespace NESterpiece
 		Bus bus;
 		Core();
 		void reset(std::shared_ptr<Cartridge> cart);
-		void tick_components(uint32_t rate);
+		void tick_components(bool read_cycle);
 		void tick_until_vblank();
 	};
 }

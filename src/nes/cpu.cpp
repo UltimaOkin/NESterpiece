@@ -8,11 +8,7 @@ namespace NESterpiece
 	void CPU::reset_to_address(uint16_t pc)
 	{
 		state = ExecutionState{
-			.complete = true,
-			.page_crossed = false,
 			.branch_taken = false,
-			.interrupt = false,
-			.current_cycle = 0, // after the fetch/decode step
 			.data = 0,
 			.address = 0,
 			.addressing_function = nullptr,
@@ -29,11 +25,7 @@ namespace NESterpiece
 	void CPU::reset()
 	{
 		state = ExecutionState{
-			.complete = false,
-			.page_crossed = false,
 			.branch_taken = false,
-			.interrupt = false,
-			.current_cycle = 1, // after the fetch/decode step
 			.data = 0,
 			.address = 0,
 			.addressing_function = &CPU::adm_interrupt<InterruptType::RESET>,
@@ -43,1464 +35,27 @@ namespace NESterpiece
 		next_interrupt_vector = RESET_VECTOR_START;
 		nmi_ready = false;
 		irq_ready = false;
+		reset_pulled = true;
 	}
 
 	void CPU::step(Bus &bus)
 	{
-		if (!state.complete)
+		if (reset_pulled)
+		{
 			(this->*state.addressing_function)(bus);
-		else
-		{
-			if (state.interrupt)
-			{
-				if (nmi_ready && next_interrupt_vector == NMI_VECTOR_START)
-					nmi_ready = false;
-				else if (irq_ready && next_interrupt_vector == IRQ_VECTOR_START)
-					irq_ready = false;
-
-				next_interrupt_vector = RESET_VECTOR_START;
-			}
-			decode(bus.read(registers.pc));
-		}
-	}
-
-	template <TargetValue val>
-	void CPU::op_ld_v(Bus &bus)
-	{
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		registers.p = data == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = data & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-
-		switch (val)
-		{
-		case TargetValue::A:
-			registers.a = data;
-			break;
-		case TargetValue::X:
-			registers.x = data;
-			break;
-		case TargetValue::Y:
-			registers.y = data;
-			break;
-		default:
-			return;
-		}
-	}
-
-	template <BitOp bit_op>
-	void CPU::op_bitwise(Bus &bus)
-	{
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-
-		switch (bit_op)
-		{
-		case BitOp::XOR:
-			registers.a ^= data;
-			break;
-		case BitOp::AND:
-			registers.a &= data;
-			break;
-		case BitOp::OR:
-			registers.a |= data;
-			break;
-		}
-
-		registers.p = registers.a == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = registers.a & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-	}
-
-	void CPU::op_adc(Bus &bus)
-	{
-		uint16_t data = state.data & 0xFF;
-		uint16_t result = registers.a + data + (registers.p & StatusFlags::Carry ? 1 : 0);
-
-		registers.p = result > 0xFF ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
-		result &= 0xFF;
-
-		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-		registers.p = ~(registers.a ^ data) & (registers.a ^ result) & 0x80 ? registers.p | StatusFlags::Overflow : registers.p & ~StatusFlags::Overflow;
-
-		registers.a = static_cast<uint8_t>(result);
-	}
-
-	void CPU::op_sbc(Bus &bus)
-	{
-		state.data = ~state.data;
-		op_adc(bus);
-	}
-
-	template <TargetValue val>
-	void CPU::op_cmp_v(Bus &bus)
-	{
-		uint8_t reg = 0;
-		switch (val)
-		{
-		case TargetValue::A:
-			reg = registers.a;
-			break;
-		case TargetValue::X:
-			reg = registers.x;
-			break;
-		case TargetValue::Y:
-			reg = registers.y;
-			break;
-		default:
+			reset_pulled = false;
 			return;
 		}
 
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		uint8_t result = (reg - data) & StatusFlags::Negative;
-		registers.p &= ~(StatusFlags::Negative | StatusFlags::Zero | StatusFlags::Carry);
-
-		if (reg < data)
-			registers.p |= result;
-		else if (reg == data)
-			registers.p |= StatusFlags::Zero | StatusFlags::Carry;
-		else if (reg > data)
-			registers.p |= result | StatusFlags::Carry;
-	}
-
-	void CPU::op_bit(Bus &bus)
-	{
-		auto data = static_cast<uint8_t>(state.data & 0xFF);
-		uint8_t result = registers.a & data;
-		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-
-		registers.p &= ~(StatusFlags::Negative | StatusFlags::Overflow);
-		registers.p |= data & 0xC0;
-	}
-
-	template <TargetValue val>
-	void CPU::op_st_v(Bus &bus)
-	{
-		uint8_t reg = 0;
-		switch (val)
-		{
-		case TargetValue::A:
-			reg = registers.a;
-			break;
-		case TargetValue::X:
-			reg = registers.x;
-			break;
-		case TargetValue::Y:
-			reg = registers.y;
-			break;
-		default:
-			return;
-		}
-		state.data = reg;
-	}
-
-	template <TargetValue val>
-	void CPU::op_inc_v(Bus &bus)
-	{
-		uint8_t result = 0;
-		switch (val)
-		{
-		case TargetValue::A:
-			result = ++registers.a;
-			break;
-		case TargetValue::X:
-			result = ++registers.x;
-			break;
-		case TargetValue::Y:
-			result = ++registers.y;
-			break;
-		case TargetValue::S:
-			result = ++registers.s;
-			break;
-		case TargetValue::M:
-			++state.data;
-			state.data &= 0xFF;
-			result = static_cast<uint8_t>(state.data);
-			break;
-		default:
-			return;
-		}
-
-		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-	}
-
-	template <TargetValue val>
-	void CPU::op_dec_v(Bus &bus)
-	{
-		uint8_t result = 0;
-		switch (val)
-		{
-		case TargetValue::A:
-			result = --registers.a;
-			break;
-		case TargetValue::X:
-			result = --registers.x;
-			break;
-		case TargetValue::Y:
-			result = --registers.y;
-			break;
-		case TargetValue::S:
-			result = --registers.s;
-			break;
-		case TargetValue::M:
-			--state.data;
-			state.data &= 0xFF;
-			result = static_cast<uint8_t>(state.data);
-			break;
-		default:
-			return;
-		}
-
-		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-	}
-
-	template <StatusFlags flag>
-	void CPU::op_clear_f(Bus &bus)
-	{
-		registers.p &= ~flag;
-	}
-
-	template <StatusFlags flag>
-	void CPU::op_set_f(Bus &bus)
-	{
-		registers.p |= flag;
-	}
-
-	template <TargetValue src, TargetValue dst>
-	void CPU::op_transfer_vv(Bus &bus)
-	{
-		uint8_t *src_value = nullptr, *dst_value = nullptr;
-		switch (src)
-		{
-		case TargetValue::A:
-			src_value = &registers.a;
-			break;
-		case TargetValue::X:
-			src_value = &registers.x;
-			break;
-		case TargetValue::Y:
-			src_value = &registers.y;
-			break;
-		case TargetValue::S:
-			src_value = &registers.s;
-			break;
-		default:
-			return;
-		}
-
-		switch (dst)
-		{
-		case TargetValue::A:
-			dst_value = &registers.a;
-			break;
-		case TargetValue::X:
-			dst_value = &registers.x;
-			break;
-		case TargetValue::Y:
-			dst_value = &registers.y;
-			break;
-		case TargetValue::S:
-			dst_value = &registers.s;
-			break;
-		default:
-			return;
-		}
-
-		*dst_value = *src_value;
-
-		if constexpr (dst != TargetValue::S)
-		{
-			registers.p = *dst_value == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-			registers.p = *dst_value & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-		}
-	}
-
-	template <TargetValue val>
-	void CPU::op_push_v(Bus &bus)
-	{
-		switch (val)
-		{
-		case TargetValue::A:
-			state.data = registers.a;
-			break;
-
-		case TargetValue::P:
-			state.data = registers.p | StatusFlags::Break | StatusFlags::Blank;
-			break;
-		default:
-			return;
-		}
-	}
-
-	template <TargetValue val>
-	void CPU::op_pop_v(Bus &bus)
-	{
-		switch (val)
-		{
-		case TargetValue::A:
-		{
-			registers.a = state.data;
-			registers.p = registers.a == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-			registers.p = registers.a & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-			break;
-		}
-		case TargetValue::P:
-		{
-			registers.p = (state.data | StatusFlags::Break) & ~StatusFlags::Blank;
-			break;
-		}
-		default:
-		{
-			return;
-		}
-		}
-	}
-
-	template <TargetValue val>
-	void CPU::op_asl_v(Bus &bus)
-	{
-		uint8_t out = 0;
-		switch (val)
-		{
-		case TargetValue::A:
-		{
-			registers.p = registers.a & 0x80 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
-			registers.a <<= 1;
-			out = registers.a;
-			break;
-		}
-		case TargetValue::M:
-		{
-			registers.p = state.data & 0x80 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
-			state.data <<= 1;
-			state.data &= 0xFF;
-			out = static_cast<uint8_t>(state.data);
-			break;
-		}
-		default:
-		{
-			return;
-		}
-		}
-
-		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-	}
-
-	template <TargetValue val>
-	void CPU::op_lsr_v(Bus &bus)
-	{
-		uint8_t out = 0;
-		switch (val)
-		{
-		case TargetValue::A:
-		{
-			registers.p = registers.a & 1 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
-			registers.a >>= 1;
-			out = registers.a;
-			break;
-		}
-		case TargetValue::M:
-		{
-			registers.p = state.data & 1 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
-			state.data >>= 1;
-			state.data &= 0xFF;
-			out = static_cast<uint8_t>(state.data);
-			break;
-		}
-		default:
-		{
-			return;
-		}
-		}
-
-		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p &= ~StatusFlags::Negative;
-	}
-
-	template <TargetValue val>
-	void CPU::op_rol_v(Bus &bus)
-	{
-		uint8_t out = 0, out_carry = 0;
-
-		switch (val)
-		{
-		case TargetValue::A:
-		{
-			out_carry = registers.a & 0x80;
-			registers.a <<= 1;
-			registers.a |= registers.p & StatusFlags::Carry ? 1 : 0;
-			out = registers.a;
-			break;
-		}
-		case TargetValue::M:
-		{
-			out_carry = state.data & 0x80;
-			state.data <<= 1;
-			state.data |= registers.p & StatusFlags::Carry ? 1 : 0;
-			state.data &= 0xFF;
-			out = static_cast<uint8_t>(state.data);
-			break;
-		}
-		default:
-		{
-			return;
-		}
-		}
-
-		registers.p = out_carry ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
-		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-	}
-
-	template <TargetValue val>
-	void CPU::op_ror_v(Bus &bus)
-	{
-		uint8_t out = 0, out_carry = 0;
-
-		switch (val)
-		{
-		case TargetValue::A:
-		{
-			out_carry = registers.a & 1;
-			registers.a >>= 1;
-			registers.a |= registers.p & StatusFlags::Carry ? 0x80 : 0;
-			out = registers.a;
-			break;
-		}
-		case TargetValue::M:
-		{
-			out_carry = state.data & 1;
-			state.data >>= 1;
-			state.data |= registers.p & StatusFlags::Carry ? 0x80 : 0;
-			state.data &= 0xFF;
-			out = static_cast<uint8_t>(state.data);
-			break;
-		}
-		default:
-		{
-			return;
-		}
-		}
-
-		registers.p = out_carry ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
-		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
-		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
-	}
-
-	template <StatusFlags cond, bool set>
-	void CPU::op_branch_cs(Bus &bus)
-	{
-		state.branch_taken = set ? (registers.p & cond) : !(registers.p & cond);
-	}
-
-	template <InterruptType int_type>
-	void CPU::adm_interrupt(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			bus.read(registers.pc);
-			if constexpr (int_type == InterruptType::BRK)
-				registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc >> 8));
-			registers.s--;
-			break;
-		}
-		case 3:
-		{
-			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc & 0xFF));
-			registers.s--;
-			break;
-		}
-		case 4:
-		{
-			// determine interrupt vector
-			if constexpr (int_type == InterruptType::BRK)
-				next_interrupt_vector = BRK_VECTOR_START;
-			else if constexpr (int_type == InterruptType::RESET)
-				next_interrupt_vector = RESET_VECTOR_START;
-
-			if (nmi_ready)
-			{
-				next_interrupt_vector = NMI_VECTOR_START;
-				nmi_ready = false;
-			}
-			else if (irq_ready && !(registers.p & StatusFlags::IRQ))
-			{
-				next_interrupt_vector = IRQ_VECTOR_START;
-				irq_ready = false;
-			}
-
-			if constexpr (int_type == InterruptType::BRK)
-				bus.write(static_cast<uint16_t>(registers.s) | 0x100, registers.p | StatusFlags::Break | StatusFlags::Blank);
-			else
-				bus.write(static_cast<uint16_t>(registers.s) | 0x100, (registers.p | StatusFlags::Blank) & ~StatusFlags::Break);
-			registers.p |= StatusFlags::IRQ;
-			registers.s--;
-			break;
-		}
-		case 5:
-		{
-			state.address = bus.read(next_interrupt_vector);
-			break;
-		}
-		case 6:
-		{
-			state.address |= static_cast<uint16_t>(bus.read(next_interrupt_vector + 1)) << 8;
-			registers.pc = state.address;
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_rti(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.data = bus.read(registers.pc);
-			break;
-		}
-		case 2:
-		{
-			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			registers.s++;
-			break;
-		}
-		case 3:
-		{
-			registers.p = (bus.read(static_cast<uint16_t>(registers.s) | 0x100) | StatusFlags::Break) & ~StatusFlags::Blank;
-			registers.s++;
-			break;
-		}
-		case 4:
-		{
-			state.address = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			registers.s++;
-			break;
-		}
-		case 5:
-		{
-			state.address |= static_cast<uint16_t>(bus.read(static_cast<uint16_t>(registers.s) | 0x100)) << 8;
-			registers.pc = state.address;
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_jsr(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.data = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			break;
-		}
-
-		case 3:
-		{
-			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc >> 8));
-			registers.s--;
-			break;
-		}
-		case 4:
-		{
-			bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc & 0xFF));
-			registers.s--;
-			break;
-		}
-		case 5:
-		{
-			uint16_t pcl = state.data;
-			uint16_t pch = bus.read(registers.pc);
-
-			registers.pc = (pch << 8) | pcl;
-			state.complete = true;
-			break;
-		}
-		}
-
-		state.current_cycle++;
-	}
-
-	void CPU::adm_rts(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			bus.read(registers.pc);
-			break;
-		}
-		case 2:
-		{
-			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			registers.s++;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			registers.s++;
-			break;
-		}
-		case 4:
-		{
-			uint16_t pch = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			registers.pc = (pch << 8) | state.data;
-			break;
-		}
-		case 5:
-		{
-			bus.read(registers.pc);
-			registers.pc++;
-			state.complete = true;
-			break;
-		}
-		}
-
-		state.current_cycle++;
-	}
-
-	void CPU::adm_relative(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.data = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			bus.read(registers.pc);
-			(this->*state.operation_function)(bus);
-			if (state.branch_taken)
-			{
-				uint16_t pcl = registers.pc & 0xFF;
-				int8_t offset = static_cast<int8_t>(state.data & 0xFF);
-				pcl += offset;
-
-				if (pcl > 0xFF)
-					state.page_crossed = true;
-
-				registers.pc &= 0xFF00;
-				registers.pc |= pcl & 0xFF;
-			}
-			else
-			{
-				state.complete = true;
-			}
-			break;
-		}
-		case 3:
-		{
-			bus.read(registers.pc);
-
-			if (state.page_crossed)
-			{
-				uint8_t pch = static_cast<uint8_t>(registers.pc >> 8);
-
-				pch += state.data & 0x80 ? -1 : 1;
-				registers.pc &= 0xFF;
-				registers.pc |= static_cast<uint16_t>(pch) << 8;
-			}
-			else
-			{
-				state.complete = true;
-			}
-
-			break;
-		}
-		case 4:
-		{
-			bus.read(registers.pc);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_pha_php(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			bus.read(registers.pc);
-			break;
-		}
-		case 2:
-		{
-			(this->*state.operation_function)(bus);
-			bus.write(static_cast<uint16_t>(registers.s) | 0x100, state.data);
-			registers.s--;
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_pla_plp(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			bus.read(registers.pc);
-			break;
-		}
-		case 2:
-		{
-
-			bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			registers.s++;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
-			(this->*state.operation_function)(bus);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	template <bool is_nop>
-	void CPU::adm_implied(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			bus.read(registers.pc);
-			if constexpr (!is_nop)
-				(this->*state.operation_function)(bus);
-
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_immediate(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.data = bus.read(registers.pc);
-			(this->*state.operation_function)(bus);
-			state.complete = true;
-			registers.pc++;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	template <InstructionType type>
-	void CPU::adm_zero_page(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			if constexpr (type == InstructionType::Read)
-			{
-				state.data = bus.read(state.address);
-				(this->*state.operation_function)(bus);
-			}
-			else if constexpr (type == InstructionType::Write)
-			{
-				(this->*state.operation_function)(bus);
-				bus.write(state.address, state.data);
-			}
-
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_zero_page_rmw(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 3:
-		{
-			bus.write(state.address, state.data);
-			(this->*state.operation_function)(bus);
-			break;
-		}
-		case 4:
-		{
-			bus.write(state.address, state.data);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	template <TargetValue reg, InstructionType type>
-	void CPU::adm_zero_page_indexed(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.data = bus.read(state.address);
-
-			if constexpr (reg == TargetValue::X)
-				state.address += registers.x;
-			else if constexpr (reg == TargetValue::Y)
-				state.address += registers.y;
-
-			state.address &= 0xFF;
-			break;
-		}
-		case 3:
-		{
-			if constexpr (type == InstructionType::Read)
-			{
-				state.data = bus.read(state.address);
-				(this->*state.operation_function)(bus);
-			}
-			else if constexpr (type == InstructionType::Write)
-			{
-				(this->*state.operation_function)(bus);
-				bus.write(state.address, state.data);
-			}
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_zero_page_indexed_rmw(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.data = bus.read(state.address);
-			state.address += registers.x;
-			state.address &= 0xFF;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 4:
-		{
-			bus.write(state.address, state.data);
-			(this->*state.operation_function)(bus);
-			break;
-		}
-		case 5:
-		{
-			bus.write(state.address, state.data);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	template <InstructionType type>
-	void CPU::adm_absolute(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
-			registers.pc++;
-			break;
-		}
-		case 3:
-		{
-			if constexpr (type == InstructionType::Read)
-			{
-				state.data = bus.read(state.address);
-				(this->*state.operation_function)(bus);
-			}
-			else if constexpr (type == InstructionType::Write)
-			{
-				(this->*state.operation_function)(bus);
-				bus.write(state.address, state.data);
-			}
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_absolute_rmw(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
-			registers.pc++;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 4:
-		{
-			bus.write(state.address, state.data);
-			(this->*state.operation_function)(bus);
-			break;
-		}
-		case 5:
-		{
-			bus.write(state.address, state.data);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_absolute_jmp(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
-			registers.pc = state.address;
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_absolute_indirect_jmp(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
-			registers.pc++;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 4:
-		{
-			auto adl = state.address & 0xFF;
-			adl++;
-			adl &= 0xFF;
-			state.address &= 0xFF00;
-			state.address |= adl;
-			state.data |= static_cast<uint16_t>(bus.read(state.address)) << 8;
-			registers.pc = state.data;
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	template <TargetValue reg, InstructionType type>
-	void CPU::adm_absolute_indexed(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			uint16_t low = state.address;
-
-			if constexpr (reg == TargetValue::X)
-			{
-				state.address += registers.x;
-
-				if ((low + registers.x) > 0xFF)
-					state.page_crossed = true;
-			}
-			else if constexpr (reg == TargetValue::Y)
-			{
-				state.address += registers.y;
-				if ((low + registers.y) > 0xFF)
-					state.page_crossed = true;
-			}
-			state.address &= 0xFF;
-			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
-			registers.pc++;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(state.address);
-			if (state.page_crossed)
-			{
-				uint16_t high = (state.address >> 8) & 0xFF;
-				high++;
-				state.address &= 0xFF;
-				state.address |= high << 8;
-			}
-			else
-			{
-				if constexpr (type == InstructionType::Read)
-				{
-					(this->*state.operation_function)(bus);
-					state.complete = true;
-				}
-			}
-			break;
-		}
-		case 4:
-		{
-			if constexpr (type == InstructionType::Read)
-			{
-				state.data = bus.read(state.address);
-				(this->*state.operation_function)(bus);
-			}
-			else if constexpr (type == InstructionType::Write)
-			{
-				(this->*state.operation_function)(bus);
-				bus.write(state.address, state.data);
-			}
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_absolute_indexed_rmw(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			uint16_t low = state.address;
-			state.address += registers.x;
-
-			if ((low + registers.x) > 0xFF)
-				state.page_crossed = true;
-
-			state.address &= 0xFF;
-			state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
-			registers.pc++;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(state.address);
-			if (state.page_crossed)
-			{
-				uint16_t high = (state.address >> 8) & 0xFF;
-				high++;
-				state.address &= 0xFF;
-				state.address |= high << 8;
-			}
-
-			break;
-		}
-		case 4:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 5:
-		{
-			bus.write(state.address, state.data);
-			break;
-		}
-		case 6:
-		{
-			(this->*state.operation_function)(bus);
-			bus.write(state.address, state.data);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	template <InstructionType type>
-	void CPU::adm_indexed_indirect_x(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.data = bus.read(state.address);
-			state.address += registers.x;
-			state.address &= 0xFF;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 4:
-		{
-			state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
-			state.address = state.data;
-			break;
-		}
-		case 5:
-		{
-			if constexpr (type == InstructionType::Read)
-			{
-				state.data = bus.read(state.address);
-				(this->*state.operation_function)(bus);
-			}
-			else if constexpr (type == InstructionType::Write)
-			{
-				(this->*state.operation_function)(bus);
-				bus.write(state.address, state.data);
-			}
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_indexed_indirect_x_rmw(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.data = bus.read(state.address);
-			state.address += registers.x;
-			state.address &= 0xFF;
-			break;
-		}
-		case 3:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 4:
-		{
-			state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
-			state.address = state.data;
-			break;
-		}
-		case 5:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 6:
-		{
-			bus.write(state.address, state.data);
-			(this->*state.operation_function)(bus);
-			break;
-		}
-		case 7:
-		{
-			bus.write(state.address, state.data);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	template <InstructionType type>
-	void CPU::adm_indirect_indexed_y(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 3:
-		{
-			uint16_t low = state.data;
-			state.data = 0;
-			state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
-			low += registers.y;
-			if (low > 0xFF)
-			{
-				low &= 0xFF;
-				state.page_crossed = true;
-			}
-
-			state.address = state.data | low;
-
-			break;
-		}
-		case 4:
-		{
-			state.data = bus.read(state.address);
-
-			if (state.page_crossed)
-			{
-				uint16_t high = (state.address >> 8) & 0xFF;
-				high++;
-				state.address &= 0xFF;
-				state.address |= high << 8;
-			}
-			else
-			{
-				if constexpr (type == InstructionType::Read)
-				{
-					(this->*state.operation_function)(bus);
-					state.complete = true;
-				}
-			}
-
-			break;
-		}
-		case 5:
-		{
-			if constexpr (type == InstructionType::Read)
-			{
-				state.data = bus.read(state.address);
-				(this->*state.operation_function)(bus);
-			}
-			else if constexpr (type == InstructionType::Write)
-			{
-				(this->*state.operation_function)(bus);
-				bus.write(state.address, state.data);
-			}
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	void CPU::adm_indirect_indexed_y_rmw(Bus &bus)
-	{
-		switch (state.current_cycle)
-		{
-		case 1:
-		{
-			state.address = bus.read(registers.pc);
-			registers.pc++;
-			break;
-		}
-		case 2:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 3:
-		{
-			uint16_t low = state.data;
-			state.data = 0;
-			state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
-			low += registers.y;
-			if (low > 0xFF)
-			{
-				low &= 0xFF;
-				state.page_crossed = true;
-			}
-
-			state.address = state.data | low;
-
-			break;
-		}
-		case 4:
-		{
-			state.data = bus.read(state.address);
-
-			if (state.page_crossed)
-			{
-				uint16_t high = (state.address >> 8) & 0xFF;
-				high++;
-				state.address &= 0xFF;
-				state.address |= high << 8;
-			}
-
-			break;
-		}
-		case 5:
-		{
-			state.data = bus.read(state.address);
-			break;
-		}
-		case 6:
-		{
-			bus.write(state.address, state.data);
-			(this->*state.operation_function)(bus);
-			break;
-		}
-		case 7:
-		{
-			bus.write(state.address, state.data);
-			state.complete = true;
-			break;
-		}
-		}
-		state.current_cycle++;
-	}
-
-	bool CPU::check_interrupts()
-	{
-		state = ExecutionState{
-			.complete = false,
-			.page_crossed = false,
-			.branch_taken = false,
-			.interrupt = true,
-			.current_cycle = 1,
-			.data = 0,
-			.address = 0,
-			.addressing_function = nullptr,
-			.operation_function = nullptr,
-		};
-
-		if (nmi_ready)
-		{
-			state.addressing_function = &CPU::adm_interrupt<InterruptType::NMI>;
-			return true;
-		}
-		else if (irq_ready && !(registers.p & StatusFlags::IRQ))
-		{
-			state.addressing_function = &CPU::adm_interrupt<InterruptType::IRQ>;
-			return true;
-		}
-
-		return false;
-	}
-
-	void CPU::decode(uint8_t opcode)
-	{
-		// if an interrupt occurs, it will set it's own execution state
 		if (check_interrupts())
-			return;
+		{
+			(this->*state.addressing_function)(bus);
+			//	return;
+		}
+
+		uint8_t opcode = bus.read(registers.pc);
 
 		state = ExecutionState{
-			.complete = false,
-			.page_crossed = false,
-			.branch_taken = false,
-			.interrupt = false,
-			.current_cycle = 1,
 			.data = 0,
 			.address = 0,
 			.addressing_function = nullptr,
@@ -2524,9 +1079,1016 @@ namespace NESterpiece
 
 		default: // Illegal/Unimplemented Opcodes
 		{
-			assert(false);
+			throw "Bad Opcode";
+			return;
+		}
+		}
+
+		(this->*state.addressing_function)(bus);
+	}
+
+	template <TargetValue val>
+	void CPU::op_ld_v(Bus &bus)
+	{
+		auto data = static_cast<uint8_t>(state.data & 0xFF);
+		registers.p = data == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = data & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+
+		switch (val)
+		{
+		case TargetValue::A:
+			registers.a = data;
+			break;
+		case TargetValue::X:
+			registers.x = data;
+			break;
+		case TargetValue::Y:
+			registers.y = data;
+			break;
+		default:
+			return;
+		}
+	}
+
+	template <BitOp bit_op>
+	void CPU::op_bitwise(Bus &bus)
+	{
+		auto data = static_cast<uint8_t>(state.data & 0xFF);
+
+		switch (bit_op)
+		{
+		case BitOp::XOR:
+			registers.a ^= data;
+			break;
+		case BitOp::AND:
+			registers.a &= data;
+			break;
+		case BitOp::OR:
+			registers.a |= data;
 			break;
 		}
+
+		registers.p = registers.a == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = registers.a & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	void CPU::op_adc(Bus &bus)
+	{
+		uint16_t data = state.data & 0xFF;
+		uint16_t result = registers.a + data + (registers.p & StatusFlags::Carry ? 1 : 0);
+
+		registers.p = result > 0xFF ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+		result &= 0xFF;
+
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+		registers.p = ~(registers.a ^ data) & (registers.a ^ result) & 0x80 ? registers.p | StatusFlags::Overflow : registers.p & ~StatusFlags::Overflow;
+
+		registers.a = static_cast<uint8_t>(result);
+	}
+
+	void CPU::op_sbc(Bus &bus)
+	{
+		state.data = ~state.data;
+		op_adc(bus);
+	}
+
+	template <TargetValue val>
+	void CPU::op_cmp_v(Bus &bus)
+	{
+		uint8_t reg = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+			reg = registers.a;
+			break;
+		case TargetValue::X:
+			reg = registers.x;
+			break;
+		case TargetValue::Y:
+			reg = registers.y;
+			break;
+		default:
+			return;
 		}
+
+		auto data = static_cast<uint8_t>(state.data & 0xFF);
+		uint8_t result = (reg - data) & StatusFlags::Negative;
+		registers.p &= ~(StatusFlags::Negative | StatusFlags::Zero | StatusFlags::Carry);
+
+		if (reg < data)
+			registers.p |= result;
+		else if (reg == data)
+			registers.p |= StatusFlags::Zero | StatusFlags::Carry;
+		else if (reg > data)
+			registers.p |= result | StatusFlags::Carry;
+	}
+
+	void CPU::op_bit(Bus &bus)
+	{
+		auto data = static_cast<uint8_t>(state.data & 0xFF);
+		uint8_t result = registers.a & data;
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+
+		registers.p &= ~(StatusFlags::Negative | StatusFlags::Overflow);
+		registers.p |= data & 0xC0;
+	}
+
+	template <TargetValue val>
+	void CPU::op_st_v(Bus &bus)
+	{
+		uint8_t reg = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+			reg = registers.a;
+			break;
+		case TargetValue::X:
+			reg = registers.x;
+			break;
+		case TargetValue::Y:
+			reg = registers.y;
+			break;
+		default:
+			return;
+		}
+		state.data = reg;
+	}
+
+	template <TargetValue val>
+	void CPU::op_inc_v(Bus &bus)
+	{
+		uint8_t result = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+			result = ++registers.a;
+			break;
+		case TargetValue::X:
+			result = ++registers.x;
+			break;
+		case TargetValue::Y:
+			result = ++registers.y;
+			break;
+		case TargetValue::S:
+			result = ++registers.s;
+			break;
+		case TargetValue::M:
+			++state.data;
+			state.data &= 0xFF;
+			result = static_cast<uint8_t>(state.data);
+			break;
+		default:
+			return;
+		}
+
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_dec_v(Bus &bus)
+	{
+		uint8_t result = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+			result = --registers.a;
+			break;
+		case TargetValue::X:
+			result = --registers.x;
+			break;
+		case TargetValue::Y:
+			result = --registers.y;
+			break;
+		case TargetValue::S:
+			result = --registers.s;
+			break;
+		case TargetValue::M:
+			--state.data;
+			state.data &= 0xFF;
+			result = static_cast<uint8_t>(state.data);
+			break;
+		default:
+			return;
+		}
+
+		registers.p = result == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = result & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <StatusFlags flag>
+	void CPU::op_clear_f(Bus &bus)
+	{
+		registers.p &= ~flag;
+	}
+
+	template <StatusFlags flag>
+	void CPU::op_set_f(Bus &bus)
+	{
+		registers.p |= flag;
+	}
+
+	template <TargetValue src, TargetValue dst>
+	void CPU::op_transfer_vv(Bus &bus)
+	{
+		uint8_t *src_value = nullptr, *dst_value = nullptr;
+		switch (src)
+		{
+		case TargetValue::A:
+			src_value = &registers.a;
+			break;
+		case TargetValue::X:
+			src_value = &registers.x;
+			break;
+		case TargetValue::Y:
+			src_value = &registers.y;
+			break;
+		case TargetValue::S:
+			src_value = &registers.s;
+			break;
+		default:
+			return;
+		}
+
+		switch (dst)
+		{
+		case TargetValue::A:
+			dst_value = &registers.a;
+			break;
+		case TargetValue::X:
+			dst_value = &registers.x;
+			break;
+		case TargetValue::Y:
+			dst_value = &registers.y;
+			break;
+		case TargetValue::S:
+			dst_value = &registers.s;
+			break;
+		default:
+			return;
+		}
+
+		*dst_value = *src_value;
+
+		if constexpr (dst != TargetValue::S)
+		{
+			registers.p = *dst_value == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+			registers.p = *dst_value & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+		}
+	}
+
+	template <TargetValue val>
+	void CPU::op_push_v(Bus &bus)
+	{
+		switch (val)
+		{
+		case TargetValue::A:
+			state.data = registers.a;
+			break;
+
+		case TargetValue::P:
+			state.data = registers.p | StatusFlags::Break | StatusFlags::Blank;
+			break;
+		default:
+			return;
+		}
+	}
+
+	template <TargetValue val>
+	void CPU::op_pop_v(Bus &bus)
+	{
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			registers.a = state.data;
+			registers.p = registers.a == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+			registers.p = registers.a & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+			break;
+		}
+		case TargetValue::P:
+		{
+			registers.p = (state.data | StatusFlags::Break) & ~StatusFlags::Blank;
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+	}
+
+	template <TargetValue val>
+	void CPU::op_asl_v(Bus &bus)
+	{
+		uint8_t out = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			registers.p = registers.a & 0x80 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			registers.a <<= 1;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			registers.p = state.data & 0x80 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			state.data <<= 1;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_lsr_v(Bus &bus)
+	{
+		uint8_t out = 0;
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			registers.p = registers.a & 1 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			registers.a >>= 1;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			registers.p = state.data & 1 ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+			state.data >>= 1;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p &= ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_rol_v(Bus &bus)
+	{
+		uint8_t out = 0, out_carry = 0;
+
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			out_carry = registers.a & 0x80;
+			registers.a <<= 1;
+			registers.a |= registers.p & StatusFlags::Carry ? 1 : 0;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			out_carry = state.data & 0x80;
+			state.data <<= 1;
+			state.data |= registers.p & StatusFlags::Carry ? 1 : 0;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out_carry ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <TargetValue val>
+	void CPU::op_ror_v(Bus &bus)
+	{
+		uint8_t out = 0, out_carry = 0;
+
+		switch (val)
+		{
+		case TargetValue::A:
+		{
+			out_carry = registers.a & 1;
+			registers.a >>= 1;
+			registers.a |= registers.p & StatusFlags::Carry ? 0x80 : 0;
+			out = registers.a;
+			break;
+		}
+		case TargetValue::M:
+		{
+			out_carry = state.data & 1;
+			state.data >>= 1;
+			state.data |= registers.p & StatusFlags::Carry ? 0x80 : 0;
+			state.data &= 0xFF;
+			out = static_cast<uint8_t>(state.data);
+			break;
+		}
+		default:
+		{
+			return;
+		}
+		}
+
+		registers.p = out_carry ? registers.p | StatusFlags::Carry : registers.p & ~StatusFlags::Carry;
+		registers.p = out == 0 ? registers.p | StatusFlags::Zero : registers.p & ~StatusFlags::Zero;
+		registers.p = out & StatusFlags::Negative ? registers.p | StatusFlags::Negative : registers.p & ~StatusFlags::Negative;
+	}
+
+	template <StatusFlags cond, bool set>
+	void CPU::op_branch_cs(Bus &bus)
+	{
+		state.branch_taken = set ? (registers.p & cond) : !(registers.p & cond);
+	}
+
+	template <InterruptType int_type>
+	void CPU::adm_interrupt(Bus &bus)
+	{
+		bus.read(registers.pc);
+		if constexpr (int_type == InterruptType::BRK)
+			registers.pc++;
+
+		bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc >> 8));
+		registers.s--;
+
+		bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc & 0xFF));
+		registers.s--;
+
+		// determine interrupt vector
+
+		if (nmi_ready)
+		{
+			next_interrupt_vector = NMI_VECTOR_START;
+			nmi_ready = false;
+		}
+		else if (irq_ready && !(registers.p & StatusFlags::IRQ))
+		{
+			next_interrupt_vector = IRQ_VECTOR_START;
+			irq_ready = false;
+		}
+		else
+		{
+			if (int_type == InterruptType::RESET)
+			{
+				next_interrupt_vector = RESET_VECTOR_START;
+			}
+			else
+			{
+				next_interrupt_vector = BRK_VECTOR_START;
+			}
+		}
+
+		if constexpr (int_type == InterruptType::BRK)
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, registers.p | StatusFlags::Break | StatusFlags::Blank);
+		else
+			bus.write(static_cast<uint16_t>(registers.s) | 0x100, (registers.p | StatusFlags::Blank) & ~StatusFlags::Break);
+
+		registers.p |= StatusFlags::IRQ;
+		registers.s--;
+
+		state.address = bus.read(next_interrupt_vector);
+
+		state.address |= static_cast<uint16_t>(bus.read(next_interrupt_vector + 1)) << 8;
+		registers.pc = state.address;
+	}
+
+	void CPU::adm_rti(Bus &bus)
+	{
+		state.data = bus.read(registers.pc);
+
+		bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+		registers.s++;
+
+		registers.p = (bus.read(static_cast<uint16_t>(registers.s) | 0x100) | StatusFlags::Break) & ~StatusFlags::Blank;
+		registers.s++;
+
+		state.address = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+		registers.s++;
+
+		state.address |= static_cast<uint16_t>(bus.read(static_cast<uint16_t>(registers.s) | 0x100)) << 8;
+		registers.pc = state.address;
+	}
+
+	void CPU::adm_jsr(Bus &bus)
+	{
+		state.data = bus.read(registers.pc);
+		registers.pc++;
+
+		bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+
+		bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc >> 8));
+		registers.s--;
+
+		bus.write(static_cast<uint16_t>(registers.s) | 0x100, static_cast<uint8_t>(registers.pc & 0xFF));
+		registers.s--;
+
+		uint16_t pcl = state.data;
+		uint16_t pch = bus.read(registers.pc);
+
+		registers.pc = (pch << 8) | pcl;
+	}
+
+	void CPU::adm_rts(Bus &bus)
+	{
+		bus.read(registers.pc);
+
+		bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+		registers.s++;
+
+		state.data = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+		registers.s++;
+
+		uint16_t pch = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+		registers.pc = (pch << 8) | state.data;
+
+		bus.read(registers.pc);
+		registers.pc++;
+	}
+
+	void CPU::adm_relative(Bus &bus)
+	{
+		state.data = bus.read(registers.pc);
+		registers.pc++;
+
+		(this->*state.operation_function)(bus);
+		bool page_crossed = false;
+		if (state.branch_taken)
+		{
+			uint16_t pcl = registers.pc & 0xFF;
+			int16_t offset = static_cast<int8_t>(state.data & 0xFF);
+			pcl += offset;
+
+			if (pcl > 0xFF)
+				page_crossed = true;
+
+			bus.read(registers.pc);
+			registers.pc &= 0xFF00;
+			registers.pc |= pcl & 0xFF;
+		}
+		else
+		{
+			return;
+		}
+
+		if (page_crossed)
+		{
+			uint8_t pch = static_cast<uint8_t>(registers.pc >> 8);
+			bus.read(registers.pc);
+			pch += state.data & 0x80 ? -1 : 1;
+			registers.pc &= 0xFF;
+			registers.pc |= static_cast<uint16_t>(pch) << 8;
+		}
+	}
+
+	void CPU::adm_pha_php(Bus &bus)
+	{
+		bus.read(registers.pc);
+
+		(this->*state.operation_function)(bus);
+		bus.write(static_cast<uint16_t>(registers.s) | 0x100, state.data);
+		registers.s--;
+	}
+
+	void CPU::adm_pla_plp(Bus &bus)
+	{
+		bus.read(registers.pc);
+
+		bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+		registers.s++;
+
+		state.data = bus.read(static_cast<uint16_t>(registers.s) | 0x100);
+		(this->*state.operation_function)(bus);
+	}
+
+	template <bool is_nop>
+	void CPU::adm_implied(Bus &bus)
+	{
+		bus.read(registers.pc);
+		if constexpr (!is_nop)
+			(this->*state.operation_function)(bus);
+	}
+
+	void CPU::adm_immediate(Bus &bus)
+	{
+		state.data = bus.read(registers.pc);
+		(this->*state.operation_function)(bus);
+		registers.pc++;
+	}
+
+	template <InstructionType type>
+	void CPU::adm_zero_page(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		if constexpr (type == InstructionType::Read)
+		{
+			state.data = bus.read(state.address);
+			(this->*state.operation_function)(bus);
+		}
+		else if constexpr (type == InstructionType::Write)
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+		}
+	}
+
+	void CPU::adm_zero_page_rmw(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+
+		bus.write(state.address, state.data);
+		(this->*state.operation_function)(bus);
+
+		bus.write(state.address, state.data);
+	}
+
+	template <TargetValue reg, InstructionType type>
+	void CPU::adm_zero_page_indexed(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+
+		if constexpr (reg == TargetValue::X)
+			state.address += registers.x;
+		else if constexpr (reg == TargetValue::Y)
+			state.address += registers.y;
+
+		state.address &= 0xFF;
+
+		if constexpr (type == InstructionType::Read)
+		{
+			state.data = bus.read(state.address);
+			(this->*state.operation_function)(bus);
+		}
+		else if constexpr (type == InstructionType::Write)
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+		}
+	}
+
+	void CPU::adm_zero_page_indexed_rmw(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+		state.address += registers.x;
+		state.address &= 0xFF;
+
+		state.data = bus.read(state.address);
+
+		bus.write(state.address, state.data);
+		(this->*state.operation_function)(bus);
+
+		bus.write(state.address, state.data);
+	}
+
+	template <InstructionType type>
+	void CPU::adm_absolute(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
+		registers.pc++;
+
+		if constexpr (type == InstructionType::Read)
+		{
+			state.data = bus.read(state.address);
+			(this->*state.operation_function)(bus);
+		}
+		else if constexpr (type == InstructionType::Write)
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+		}
+	}
+
+	void CPU::adm_absolute_rmw(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+
+		bus.write(state.address, state.data);
+		(this->*state.operation_function)(bus);
+
+		bus.write(state.address, state.data);
+	}
+
+	void CPU::adm_absolute_jmp(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
+		registers.pc = state.address;
+	}
+
+	void CPU::adm_absolute_indirect_jmp(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+
+		auto adl = state.address & 0xFF;
+		adl++;
+		adl &= 0xFF;
+		state.address &= 0xFF00;
+		state.address |= adl;
+		state.data |= static_cast<uint16_t>(bus.read(state.address)) << 8;
+		registers.pc = state.data;
+	}
+
+	template <TargetValue reg, InstructionType type>
+	void CPU::adm_absolute_indexed(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		uint16_t low = state.address;
+		bool page_crossed = false;
+		if constexpr (reg == TargetValue::X)
+		{
+			state.address += registers.x;
+
+			if ((low + registers.x) > 0xFF)
+				page_crossed = true;
+		}
+		else if constexpr (reg == TargetValue::Y)
+		{
+			state.address += registers.y;
+			if ((low + registers.y) > 0xFF)
+				page_crossed = true;
+		}
+		state.address &= 0xFF;
+		state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+		if (page_crossed)
+		{
+			uint16_t high = (state.address >> 8) & 0xFF;
+			high++;
+			state.address &= 0xFF;
+			state.address |= high << 8;
+		}
+		else
+		{
+			if constexpr (type == InstructionType::Read)
+			{
+				(this->*state.operation_function)(bus);
+				return;
+			}
+		}
+
+		if constexpr (type == InstructionType::Read)
+		{
+			state.data = bus.read(state.address);
+			(this->*state.operation_function)(bus);
+		}
+		else if constexpr (type == InstructionType::Write)
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+		}
+	}
+
+	void CPU::adm_absolute_indexed_rmw(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		uint16_t low = state.address;
+		state.address += registers.x;
+
+		bool page_crossed = false;
+		if ((low + registers.x) > 0xFF)
+			page_crossed = true;
+
+		state.address &= 0xFF;
+		state.address |= static_cast<uint16_t>(bus.read(registers.pc)) << 8;
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+		if (page_crossed)
+		{
+			uint16_t high = (state.address >> 8) & 0xFF;
+			high++;
+			state.address &= 0xFF;
+			state.address |= high << 8;
+		}
+
+		state.data = bus.read(state.address);
+
+		bus.write(state.address, state.data);
+
+		(this->*state.operation_function)(bus);
+		bus.write(state.address, state.data);
+	}
+
+	template <InstructionType type>
+	void CPU::adm_indexed_indirect_x(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+		state.address += registers.x;
+		state.address &= 0xFF;
+
+		state.data = bus.read(state.address);
+
+		state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
+		state.address = state.data;
+
+		if constexpr (type == InstructionType::Read)
+		{
+			state.data = bus.read(state.address);
+			(this->*state.operation_function)(bus);
+		}
+		else if constexpr (type == InstructionType::Write)
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+		}
+	}
+
+	void CPU::adm_indexed_indirect_x_rmw(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+		state.address += registers.x;
+		state.address &= 0xFF;
+
+		state.data = bus.read(state.address);
+
+		state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
+		state.address = state.data;
+
+		state.data = bus.read(state.address);
+
+		bus.write(state.address, state.data);
+		(this->*state.operation_function)(bus);
+
+		bus.write(state.address, state.data);
+	}
+
+	template <InstructionType type>
+	void CPU::adm_indirect_indexed_y(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+
+		uint16_t low = state.data;
+		state.data = 0;
+		state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
+		low += registers.y;
+
+		bool page_crossed = false;
+
+		if (low > 0xFF)
+		{
+			low &= 0xFF;
+			page_crossed = true;
+		}
+
+		state.address = state.data | low;
+
+		state.data = bus.read(state.address);
+
+		if (page_crossed)
+		{
+			uint16_t high = (state.address >> 8) & 0xFF;
+			high++;
+			state.address &= 0xFF;
+			state.address |= high << 8;
+		}
+		else
+		{
+			if constexpr (type == InstructionType::Read)
+			{
+				(this->*state.operation_function)(bus);
+				return;
+			}
+		}
+
+		if constexpr (type == InstructionType::Read)
+		{
+			state.data = bus.read(state.address);
+			(this->*state.operation_function)(bus);
+		}
+		else if constexpr (type == InstructionType::Write)
+		{
+			(this->*state.operation_function)(bus);
+			bus.write(state.address, state.data);
+		}
+	}
+
+	void CPU::adm_indirect_indexed_y_rmw(Bus &bus)
+	{
+		state.address = bus.read(registers.pc);
+		registers.pc++;
+
+		state.data = bus.read(state.address);
+
+		uint16_t low = state.data;
+		state.data = 0;
+		state.data |= static_cast<uint16_t>(bus.read((state.address + 1) & 0xFF)) << 8;
+		low += registers.y;
+
+		bool page_crossed = false;
+
+		if (low > 0xFF)
+		{
+			low &= 0xFF;
+			page_crossed = true;
+		}
+
+		state.address = state.data | low;
+
+		state.data = bus.read(state.address);
+
+		if (page_crossed)
+		{
+			uint16_t high = (state.address >> 8) & 0xFF;
+			high++;
+			state.address &= 0xFF;
+			state.address |= high << 8;
+		}
+
+		state.data = bus.read(state.address);
+
+		bus.write(state.address, state.data);
+		(this->*state.operation_function)(bus);
+
+		bus.write(state.address, state.data);
+	}
+
+	bool CPU::check_interrupts()
+	{
+
+		if (nmi_ready)
+		{
+			state = ExecutionState{
+				.branch_taken = false,
+				.data = 0,
+				.address = 0,
+				.addressing_function = nullptr,
+				.operation_function = nullptr,
+			};
+			state.addressing_function = &CPU::adm_interrupt<InterruptType::NMI>;
+
+			return true;
+		}
+		else if (irq_ready && !(registers.p & StatusFlags::IRQ))
+		{
+			state = ExecutionState{
+				.branch_taken = false,
+				.data = 0,
+				.address = 0,
+				.addressing_function = nullptr,
+				.operation_function = nullptr,
+			};
+			state.addressing_function = &CPU::adm_interrupt<InterruptType::IRQ>;
+			return true;
+		}
+
+		return false;
 	}
 }

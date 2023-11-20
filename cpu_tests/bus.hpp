@@ -1,6 +1,7 @@
 #pragma once
 #include <cinttypes>
 #include <array>
+#include <vector>
 namespace NESterpiece
 {
 	enum BusActivityType
@@ -20,6 +21,7 @@ namespace NESterpiece
 	public:
 		std::array<uint8_t, 65536> memory{};
 		BusActivity last_activity;
+		std::vector<BusActivity> activity_list{};
 		uint8_t read(uint16_t address);
 		void write(uint16_t address, uint8_t value);
 	};

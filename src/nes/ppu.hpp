@@ -14,6 +14,7 @@ namespace NESterpiece
 		OAMPatternAddress = 8,
 		BGPatternAddress = 16,
 		OAMSize = 32,
+		ExtPinMode = 64,
 		EnableNMI = 128,
 	};
 
@@ -69,18 +70,35 @@ namespace NESterpiece
 		uint8_t pattern_low = 0, pattern_high = 0;
 	};
 
+	struct PPUSnapshot
+	{
+
+		bool write_toggle = false;
+		uint8_t fine_x = 0, status = 0, control = 0, mask = 0;
+		uint8_t oam_address = 0;
+		uint16_t v = 0, t = 0, scanline = 0, cycles = 0;
+		uint32_t frame_num = 0, total_frame_cycles = 0;
+	};
+
+	enum class SnapshotEvent
+	{
+		EveryFrame,
+		OnScanlineCycle,
+		OnFrame,
+	};
+
 	class PPU
 	{
 		Core &core;
 
 	public:
-		bool write_toggle = false, _frame_ended = false, odd = false;
+		bool write_toggle = false, _frame_ended = false, odd = false, w2006_delay = false;
 		uint8_t fine_x_scroll = 0;
 		uint8_t ctrl = 0, mask = 0, status = PPUStatusFlags::VBlank | PPUStatusFlags::SpriteOverflow;
 		uint8_t oam_address = 0;
 		uint8_t address = 0, data = 0;
 		uint16_t v = 0, t = 0;
-		uint16_t cycles = 0;
+		uint16_t cycles = 0, w2006_cycles = 0;
 		uint16_t scanline_num = 0;
 		uint32_t frame_num = 0, total_frame_cycles = 0;
 
@@ -91,10 +109,16 @@ namespace NESterpiece
 		std::array<uint8_t, 0x100> oam{};
 		std::array<uint32_t, 256 * 240> framebuffer{};
 
+		PPUSnapshot snapshot;
+		SnapshotEvent update_event = SnapshotEvent::OnScanlineCycle;
+		uint16_t trigger_scanline = 0, trigger_cycle = 0;
+		uint32_t trigger_frame = 0;
+
 		PPU(Core &core);
 		void reset();
-
+		void update_snapshot();
 		void step();
+		void check_snapshots();
 		void sprite_eval();
 		void run_fetcher();
 		void increment_x();

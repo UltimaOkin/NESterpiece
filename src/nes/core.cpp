@@ -4,7 +4,7 @@
 namespace NESterpiece
 {
 	Core::Core()
-		: cpu(), ppu(*this), bus(ppu, cpu.oam_dma)
+		: cpu(), ppu(*this), bus(ppu, cpu.oam_dma, *this)
 	{
 	}
 
@@ -15,49 +15,43 @@ namespace NESterpiece
 		ppu.reset();
 	}
 
-	void Core::tick_components(uint32_t rate)
+	void Core::tick_components(bool read_cycle)
 	{
-		for (uint32_t i = 0; i < rate; ++i)
+		if (read_cycle)
 		{
-			cpu_counter++;
-			ppu_counter++;
-
-			if (ppu_counter == PPU_CLOCK_DIVIDER)
+			if (cpu.oam_dma.active)
 			{
-				ppu_counter = 0;
-				ppu.step();
+				while (cpu.oam_dma.active)
+				{
+					for (uint32_t i = 0; i < 3; ++i)
+					{
+						ppu.step();
+					}
+					cpu.oam_dma.step(bus, ppu);
+				}
 			}
-
-			if (cpu_counter == CPU_CLOCK_DIVIDER)
+			else
 			{
-				cpu_counter = 0;
-
-				cpu.oam_dma.step(bus, ppu);
-				if (!cpu.oam_dma.active)
-					cpu.step(bus);
+				for (uint32_t i = 0; i < 3; ++i)
+				{
+					ppu.step();
+				}
+			}
+		}
+		else
+		{
+			for (uint32_t i = 0; i < 3; ++i)
+			{
+				ppu.step();
 			}
 		}
 	}
+
 	void Core::tick_until_vblank()
 	{
 		do
 		{
-			cpu_counter++;
-			ppu_counter++;
-
-			if (ppu_counter == PPU_CLOCK_DIVIDER)
-			{
-				ppu_counter = 0;
-				ppu.step();
-			}
-
-			if (cpu_counter == CPU_CLOCK_DIVIDER)
-			{
-				cpu_counter = 0;
-				cpu.oam_dma.step(bus, ppu);
-				if (!cpu.oam_dma.active)
-					cpu.step(bus);
-			}
+			cpu.step(bus);
 
 		} while (!ppu.frame_ended());
 	}
